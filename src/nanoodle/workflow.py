@@ -279,6 +279,9 @@ class Workflow(object):
                 node = copy.deepcopy(node)
                 for port, (src, sport) in overrides.items():
                     v = (runs[src].out or {}).get(sport)
+                    if v is None:
+                        continue  # play.html: if(v!=null) — a null upstream value
+                                  # leaves the typed field value in effect
                     node.fields[port] = v.url if isinstance(v, MediaRef) else v
             out = engine.run_node(node, inp, make_on_cost(nid))
             return out, time.monotonic() - t0
@@ -286,6 +289,7 @@ class Workflow(object):
         pool = ThreadPoolExecutor(max_workers=max(1, min(8, len(order))))
         pending = {}   # future -> node id
         settled = set()
+        abandoned = False   # deadline hit with nodes still in flight
         try:
             while len(settled) < len(order):
                 timed_out = deadline is not None and time.monotonic() > deadline
@@ -300,17 +304,19 @@ class Workflow(object):
                         run = runs[nid]
                         failed_dep = next((d for d in deps[nid]
                                            if runs[d].status == "failed"), None)
-                        if failed_dep is not None:
+                        if timed_out:
+                            # timeout wins the message — an upstream marked
+                            # failed BY the timeout must not relabel this node
+                            run.status = "failed"
+                            run.error = "run timed out after %ss" % timeout
+                            settled.add(nid)
+                            progressed = True
+                        elif failed_dep is not None:
                             run.status = "failed"
                             run.error = "upstream failed: " + display_name(graph.node(failed_dep))
                             settled.add(nid)
                             progress({"type": "node-error", "node_id": nid,
                                       "name": display_name(graph.node(nid)), "error": run.error})
-                            progressed = True
-                        elif timed_out:
-                            run.status = "failed"
-                            run.error = "run timed out after %ss" % timeout
-                            settled.add(nid)
                             progressed = True
                         else:
                             fut = pool.submit(exec_node, nid)
@@ -319,7 +325,26 @@ class Workflow(object):
                     if len(settled) < len(order):
                         break  # nothing runnable left (should not happen: topo checked)
                     continue
-                done, _ = wait(list(pending.keys()), return_when=FIRST_COMPLETED)
+                remaining = None
+                if deadline is not None:
+                    remaining = max(0.0, deadline - time.monotonic())
+                done, _ = wait(list(pending.keys()), timeout=remaining,
+                               return_when=FIRST_COMPLETED)
+                if not done:
+                    # deadline expired while nodes were in flight: reflect the
+                    # timeout in the result NOW; the worker threads are left to
+                    # finish in the pool but their results are discarded.
+                    abandoned = True
+                    for fut, nid in list(pending.items()):
+                        run = runs[nid]
+                        run.status = "failed"
+                        run.error = "run timed out after %ss" % timeout
+                        settled.add(nid)
+                        progress({"type": "node-error", "node_id": nid,
+                                  "name": display_name(graph.node(nid)),
+                                  "error": run.error})
+                    pending.clear()
+                    continue  # the scheduling pass marks the rest timed out
                 for fut in done:
                     nid = pending.pop(fut)
                     run = runs[nid]
@@ -339,7 +364,9 @@ class Workflow(object):
                                   "name": display_name(node), "error": run.error})
                     settled.add(nid)
         finally:
-            pool.shutdown(wait=True)
+            # after a timeout, do NOT block on in-flight nodes — return the
+            # timed-out result promptly and let the threads drain in background
+            pool.shutdown(wait=not abandoned)
 
         # ---- assemble result -------------------------------------------------
         outputs = {}

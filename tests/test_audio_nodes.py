@@ -143,6 +143,27 @@ class MusicPollTest(MockedTest):
         wf = self.wf("music-poll.json", **FAST)
         self.assertEqual(wf.run()["Music"].url, "https://cdn/g.mp3")
 
+    def test_transient_poll_transport_failure_is_skipped(self):
+        # regression: a network blip on a status GET must NOT abort the paid
+        # in-flight job — SPEC-engine: poll failures silently continue
+        from nanoodle import NanoodleError
+        from nanoodle.transport import default_http
+        state = {"fails": 0}
+
+        def flaky(method, url, headers=None, body=None, timeout=None):
+            if method == "GET" and "/api/tts/status" in url and state["fails"] == 0:
+                state["fails"] += 1
+                raise NanoodleError("connection reset")
+            return default_http(method, url, headers=headers, body=body, timeout=timeout)
+
+        self.mock.script("POST", "/api/v1/audio/speech", {"status": 200, "json": {"runId": "j"}})
+        self.mock.script("GET", "/api/tts/status",
+                         {"status": 200, "json": {"status": "completed",
+                                                  "audioUrl": "https://cdn/s.mp3"}})
+        wf = self.wf("music-poll.json", http=flaky, **FAST)
+        self.assertEqual(wf.run()["Music"].url, "https://cdn/s.mp3")
+        self.assertEqual(state["fails"], 1)
+
     def test_poll_completed_without_url_errors(self):
         self.mock.script("POST", "/api/v1/audio/speech", {"status": 200, "json": {"runId": "j"}})
         self.mock.script("GET", "/api/tts/status", {"status": 200, "json": {"status": "completed"}})

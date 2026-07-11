@@ -66,10 +66,66 @@ class ImageNodeTest(MockedTest):
         wf = self.wf_dict({"nodes": [
             {"id": "n1", "type": "image",
              "fields": {"model": "custom-civitai", "prompt": "p",
-                        "customCivitaiAir": "urn:air:sdxl:ckpt@1"}}]})
+                        "customCivitaiAir": "civitai:123@456"}}]})
         wf.run()
         req = self.mock.requests_to("/v1/images/generations")[0]
-        self.assertEqual(req.json["customCivitaiAir"], "urn:air:sdxl:ckpt@1")
+        self.assertEqual(req.json["customCivitaiAir"], "civitai:123@456")
+
+    def test_custom_civitai_air_normalized_from_url_and_bare_forms(self):
+        # play.html normalizeCustomCivitaiAir: civitai.com URL and bare ID@VER
+        # forms are normalized to civitai:ID@VER before the request
+        for raw, want in (
+                ("https://civitai.com/models/123?modelVersionId=456", "civitai:123@456"),
+                ("123@456", "civitai:123@456")):
+            self.mock.reset()
+            self.mock.script("POST", "/v1/images/generations",
+                             image_response(urls=["https://x/y"]))
+            wf = self.wf_dict({"nodes": [
+                {"id": "n1", "type": "image",
+                 "fields": {"model": "custom-civitai", "prompt": "p",
+                            "customCivitaiAir": raw}}]})
+            wf.run()
+            req = self.mock.requests_to("/v1/images/generations")[0]
+            self.assertEqual(req.json["customCivitaiAir"], want)
+
+    def test_custom_civitai_empty_air_errors_before_the_paid_call(self):
+        wf = self.wf_dict({"nodes": [
+            {"id": "n1", "type": "image",
+             "fields": {"model": "custom-civitai", "prompt": "p"}}]})
+        with self.assertRaises(RunError) as ctx:
+            wf.run()
+        self.assertIn("select an AIR model", str(ctx.exception))
+        self.assertEqual(self.mock.requests, [])   # never charged
+
+    def test_custom_civitai_malformed_air_errors_before_the_paid_call(self):
+        wf = self.wf_dict({"nodes": [
+            {"id": "n1", "type": "image",
+             "fields": {"model": "custom-civitai", "prompt": "p",
+                        "customCivitaiAir": "urn:air:sdxl:ckpt@1"}}]})
+        with self.assertRaises(RunError) as ctx:
+            wf.run()
+        self.assertIn("AIR must look like", str(ctx.exception))
+        self.assertEqual(self.mock.requests, [])
+
+    def test_baked_sel_picks_the_primary_image(self):
+        # play.html: image: urls[clamp(parseInt(fields.sel))] — not always urls[0]
+        self.mock.script("POST", "/v1/images/generations",
+                         image_response(urls=["https://x/0.png", "https://x/1.png"]))
+        wf = self.wf_dict({"nodes": [
+            {"id": "n1", "type": "image",
+             "fields": {"model": "m", "prompt": "p", "variations": "2", "sel": "1"}}]})
+        self.assertEqual(wf.run()["Image"].url, "https://x/1.png")
+
+    def test_out_of_range_or_junk_sel_clamped(self):
+        for sel, want in (("7", "https://x/1.png"), ("-3", "https://x/0.png"),
+                          ("junk", "https://x/0.png")):
+            self.mock.reset()
+            self.mock.script("POST", "/v1/images/generations",
+                             image_response(urls=["https://x/0.png", "https://x/1.png"]))
+            wf = self.wf_dict({"nodes": [
+                {"id": "n1", "type": "image",
+                 "fields": {"model": "m", "prompt": "p", "variations": "2", "sel": sel}}]})
+            self.assertEqual(wf.run()["Image"].url, want)
 
     def test_non_numeric_seed_omitted(self):
         self.mock.script("POST", "/v1/images/generations", image_response(urls=["https://x/y"]))
@@ -196,6 +252,28 @@ class InpaintNodeTest(MockedTest):
         self.assertIn("Mask", str(ctx.exception))
         self.assertEqual(self.mock.requests, [])
 
+    def test_neither_wired_both_image_and_mask_supplied_as_run_inputs(self):
+        # regression: with nothing wired BOTH image and mask are derived inputs
+        # (the mask used to be underivable, making such workflows unrunnable)
+        self.mock.script("POST", "/v1/images/generations", image_response(urls=["https://x/o.png"]))
+        wf = self.wf_dict({"nodes": [
+            {"id": "n1", "type": "inpaint", "fields": {"model": "m", "prompt": "p"}}]})
+        wf.run({"n1.image": "data:image/png;base64,SRC=",
+                "n1.mask": "data:image/png;base64,MASK="})
+        req = self.mock.requests_to("/v1/images/generations")[0]
+        self.assertEqual(req.json["imageDataUrl"], "data:image/png;base64,SRC=")
+        self.assertEqual(req.json["maskDataUrl"], "data:image/png;base64,MASK=")
+
+    def test_neither_wired_nothing_baked_is_upfront_missing_error(self):
+        from nanoodle import NanoodleError
+        wf = self.wf_dict({"nodes": [
+            {"id": "n1", "type": "inpaint", "fields": {"model": "m", "prompt": "p"}}]})
+        with self.assertRaises(NanoodleError) as ctx:
+            wf.run()
+        self.assertIn("missing required input", str(ctx.exception))
+        self.assertIn("Mask", str(ctx.exception))
+        self.assertEqual(self.mock.requests, [])   # fails before spending
+
     def test_mask_supplied_as_run_input(self):
         self.mock.script("POST", "/v1/images/generations", image_response(urls=["https://x/o.png"]))
         wf = self.wf_dict({"nodes": [
@@ -206,6 +284,59 @@ class InpaintNodeTest(MockedTest):
         wf.run({"Mask (white = repaint)": "data:image/png;base64,RUNMASK"})
         req = self.mock.requests_to("/v1/images/generations")[0]
         self.assertEqual(req.json["maskDataUrl"], "data:image/png;base64,RUNMASK")
+
+
+class LoraParamsTest(MockedTest):
+    """Authored LoRAs must ride on image-family requests
+    (SPEC-engine image section '+ LoRA params'; play.html imgExtra→loraParams)."""
+
+    def _image_body(self, model, fields_extra):
+        self.mock.script("POST", "/v1/images/generations", image_response(urls=["https://x/y"]))
+        fields = {"model": model, "prompt": "p"}
+        fields.update(fields_extra)
+        wf = self.wf_dict({"nodes": [{"id": "n1", "type": "image", "fields": fields}]})
+        wf.run()
+        return self.mock.requests_to("/v1/images/generations")[0].json
+
+    def test_flux_lora_single_slot_keys(self):
+        body = self._image_body("flux-lora", {"loraUrl": "https://host/a.safetensors",
+                                              "loraStrength": "0.7"})
+        self.assertEqual(body["lora_url"], "https://host/a.safetensors")
+        self.assertEqual(body["lora_strength"], 0.7)
+
+    def test_flux2_multi_lora_numbered_keys(self):
+        body = self._image_body("flux-2-dev-lora", {"loras": [
+            {"url": "https://host/a.safetensors", "strength": "1"},
+            {"url": "https://host/b.safetensors", "strength": "0.5"}]})
+        self.assertEqual(body["lora_url_1"], "https://host/a.safetensors")
+        self.assertEqual(body["lora_scale_1"], 1)
+        self.assertEqual(body["lora_url_2"], "https://host/b.safetensors")
+        self.assertEqual(body["lora_scale_2"], 0.5)
+
+    def test_pimage_lora_weights_keys_and_blank_strength_defaults_to_1(self):
+        body = self._image_body("pruna-ai/p-image/edit-lora",
+                                {"loraUrl": "https://host/a.safetensors"})
+        self.assertEqual(body["lora_weights"], "https://host/a.safetensors")
+        self.assertEqual(body["lora_scale"], 1)
+
+    def test_hf_blob_url_normalized_to_resolve(self):
+        body = self._image_body("flux-lora",
+                                {"loraUrl": "https://huggingface.co/u/r/blob/main/a.safetensors"})
+        self.assertEqual(body["lora_url"],
+                         "https://huggingface.co/u/r/resolve/main/a.safetensors")
+
+    def test_non_lora_model_sends_no_lora_keys(self):
+        body = self._image_body("nano-banana-2", {"loraUrl": "https://host/a.safetensors"})
+        self.assertFalse([k for k in body if "lora" in k.lower()])
+
+    def test_civitai_lora_link_rejected_before_the_paid_call(self):
+        wf = self.wf_dict({"nodes": [{"id": "n1", "type": "image",
+                                      "fields": {"model": "flux-lora", "prompt": "p",
+                                                 "loraUrl": "https://civitai.com/models/9"}}]})
+        with self.assertRaises(RunError) as ctx:
+            wf.run()
+        self.assertIn("CivitAI links", str(ctx.exception))
+        self.assertEqual(self.mock.requests, [])
 
 
 if __name__ == "__main__":

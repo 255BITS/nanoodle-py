@@ -318,6 +318,73 @@ class FieldOverrideTest(MockedTest):
         req = self.mock.requests_to("/api/v1/audio/speech")[0]
         self.assertEqual(req.json["input"], "read me")
 
+    def test_none_upstream_value_leaves_typed_field(self):
+        # regression: play.html only overrides when v != null — a link from a
+        # nonexistent out port must not clobber the typed prompt with None
+        self.mock.script("POST", "/api/v1/chat/completions", chat_response("ok"))
+        wf = self.wf_dict({"nodes": [
+            {"id": "n1", "type": "text", "fields": {"text": "x"}},
+            {"id": "n2", "type": "llm", "fields": {"model": "m", "prompt": "typed prompt"}},
+        ], "links": [{"id": "l1", "from": {"node": "n1", "port": "nosuchport"},
+                      "to": {"node": "n2", "port": "prompt"}}]})
+        result = wf.run()
+        req = self.mock.requests_to("/api/v1/chat/completions")[0]
+        self.assertEqual(req.json["messages"][-1]["content"], "typed prompt")
+        self.assertEqual(result["LLM"], "ok")
+
+
+class MaxTokensDegradeTest(MockedTest):
+    def test_non_numeric_max_tokens_degrades_instead_of_crashing(self):
+        # regression: play.html (+maxTokens -> NaN -> null) still completes the
+        # call; a hand-edited graph must not die on ValueError
+        self.mock.script("POST", "/api/v1/chat/completions", chat_response("ok"))
+        wf = self.wf_dict({"nodes": [
+            {"id": "n1", "type": "llm",
+             "fields": {"model": "m", "prompt": "p", "maxTokens": "lots"}}]})
+        result = wf.run()
+        self.assertNotIn("max_tokens", self.mock.requests_to("/api/v1/chat/completions")[0].json)
+        self.assertEqual(result["LLM"], "ok")
+
+
+class NamedNodeRunTest(MockedTest):
+    """Regression: the very key wf.inputs advertises for a custom-named node
+    (with an unfed optional system input) must run — and so must a bare scalar."""
+
+    def _wf(self):
+        self.mock.script("POST", "/api/v1/chat/completions", chat_response("ok"))
+        return self.wf_dict({"nodes": [
+            {"id": "n1", "type": "llm", "fields": {"model": "m"}, "name": "Writer"}]})
+
+    def test_advertised_custom_name_key_runs(self):
+        wf = self._wf()
+        self.assertIn("Writer", [s.key for s in wf.inputs])
+        result = wf.run({"Writer": "hello"})
+        req = self.mock.requests_to("/api/v1/chat/completions")[0]
+        self.assertEqual(req.json["messages"][-1], {"role": "user", "content": "hello"})
+        self.assertEqual(result["Writer"], "ok")
+
+    def test_bare_scalar_runs_the_single_required_input(self):
+        wf = self._wf()
+        result = wf.run("hello")
+        req = self.mock.requests_to("/api/v1/chat/completions")[0]
+        self.assertEqual(req.json["messages"][-1], {"role": "user", "content": "hello"})
+        self.assertEqual(result["Writer"], "ok")
+
+
+class DrawSelTest(MockedTest):
+    def test_baked_sel_picks_the_primary_image(self):
+        # play.html draw: image = res.images[clamp(parseInt(fields.sel))]
+        self.mock.script("POST", "/api/v1/chat/completions", chat_response(
+            "t", images=[{"image_url": {"url": "https://x/0.png"}},
+                         {"image_url": {"url": "https://x/1.png"}}]))
+        wf = self.wf_dict({"nodes": [
+            {"id": "n1", "type": "draw",
+             "fields": {"model": "m", "prompt": "p", "sel": "1"}}]})
+        result = wf.run()
+        self.assertEqual(result["Draw"].url, "https://x/1.png")
+        self.assertEqual([r.url for r in result.nodes["n1"].out["images"]],
+                         ["https://x/0.png", "https://x/1.png"])
+
 
 if __name__ == "__main__":
     unittest.main()

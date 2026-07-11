@@ -141,7 +141,11 @@ def derive_inputs(graph):
                 out.append(InputSpec("", node.id, "image", "image",
                                      "Image" if mask_fed else "Image — brush the area to repaint",
                                      node_name=name))
-            elif not mask_fed:
+            if not mask_fed:
+                # derived whenever the mask port is unwired — including the
+                # neither-wired case (play.html's combined upload+brush control
+                # writes BOTH fields.image and fields.mask); a baked fields.mask
+                # satisfies the required-input check.
                 out.append(InputSpec("", node.id, "mask", "image", "Mask (white = repaint)",
                                      node_name=name))
             continue
@@ -242,6 +246,17 @@ def resolve_input_key(inputs, key, graph):
     if named:
         if len(named) == 1:
             return named[0]
+        # Several inputs share the node name (e.g. llm prompt + optional system).
+        # Prefer the input whose ASSIGNED key is exactly this name (the PR #138
+        # flat-label input), then the node's single required input, before
+        # declaring ambiguity — otherwise the very key wf.inputs advertises
+        # would be unresolvable.
+        exact = [s for s in named if _norm(s.key) == k]
+        if len(exact) == 1:
+            return exact[0]
+        required = [s for s in named if not s.optional]
+        if len(required) == 1:
+            return required[0]
         raise NanoodleError(
             "input name %r is ambiguous — use one of: %s"
             % (key, ", ".join("%s.%s" % (s.node_id, s.field) for s in named)))

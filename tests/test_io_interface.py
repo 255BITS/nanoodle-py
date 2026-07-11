@@ -40,9 +40,13 @@ class InputDerivationTest(unittest.TestCase):
         specs = {(s.node_id, s.field): s for s in wf.inputs}
         self.assertIn(("n1", "prompt"), specs)
         self.assertEqual(specs[("n1", "prompt")].label, "What to paint in")
-        # image input surfaced (brush case); mask NOT a separate input then
+        # BOTH image and mask surfaced (play.html's combined upload+brush
+        # control writes both fields) — otherwise the mask could never be
+        # supplied and the workflow would be unrunnable
         self.assertIn(("n1", "image"), specs)
-        self.assertNotIn(("n1", "mask"), specs)
+        self.assertIn(("n1", "mask"), specs)
+        self.assertEqual(specs[("n1", "image")].label, "Image — brush the area to repaint")
+        self.assertEqual(specs[("n1", "mask")].label, "Mask (white = repaint)")
 
     def test_inpaint_mask_input_when_image_wired(self):
         wf = Workflow.from_dict({"nodes": [
@@ -104,17 +108,29 @@ class KeyResolutionTest(unittest.TestCase):
             wf.run({"Writer": "x"})   # two nodes named Writer
         self.assertIn("ambiguous", str(ctx.exception))
 
-    def test_custom_name_ambiguous_when_node_has_two_inputs(self):
-        # a named llm with prompt AND system derived: the bare name can't pick one
+    def test_custom_name_resolves_to_single_required_input(self):
+        # regression: a named llm with prompt AND optional system derived — the
+        # advertised key ("Poet", assigned by the PR #138 flat-label rule) MUST
+        # resolve to the required prompt, not raise "ambiguous"
         wf = Workflow.from_dict({"nodes": [
             {"id": "n1", "type": "llm", "fields": {"model": "m"}, "name": "Poet"}]},
+            api_key="k")
+        self.assertIn("Poet", [s.key for s in wf.inputs])   # the advertised key
+        spec = resolve_input_key(wf.inputs, "Poet", wf.graph)
+        self.assertEqual((spec.node_id, spec.field), ("n1", "prompt"))
+
+    def test_custom_name_ambiguous_across_two_nodes(self):
+        # two DIFFERENT nodes sharing one name stay ambiguous
+        wf = Workflow.from_dict({"nodes": [
+            {"id": "n1", "type": "llm", "fields": {"model": "m"}, "name": "Poet"},
+            {"id": "n2", "type": "image", "fields": {"model": "m"}, "name": "Poet"}]},
             api_key="k")
         with self.assertRaises(NanoodleError) as ctx:
             resolve_input_key(wf.inputs, "Poet", wf.graph)
         msg = str(ctx.exception)
         self.assertIn("ambiguous", msg)
         self.assertIn("n1.prompt", msg)
-        self.assertIn("n1.system", msg)
+        self.assertIn("n2.prompt", msg)
 
     def test_bare_scalar_refused_with_multiple_required(self):
         wf = Workflow.load(fixture("llm-vision.json"), api_key="k")

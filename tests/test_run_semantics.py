@@ -72,17 +72,23 @@ class ProgressTest(MockedTest):
 
 
 class OverallTimeoutTest(MockedTest):
-    def test_timeout_stops_scheduling_downstream_nodes(self):
-        # n2 (slow) completes because it already started; n3 must never start
+    def test_timeout_bounds_in_flight_nodes_and_returns_promptly(self):
+        # regression: the deadline must bound the blocking wait too — a slow
+        # in-flight node used to run to completion and return SUCCESS long
+        # after the timeout, so run(timeout=...) had zero effect
         self.mock.script("POST", "/api/v1/chat/completions",
-                         dict(chat_response("slow"), delay=0.3))
+                         dict(chat_response("slow"), delay=0.5))
         wf = self.wf("starter-graph.json")
+        t0 = time.monotonic()
         with self.assertRaises(RunError) as ctx:
             wf.run({"Text": "x"}, timeout=0.1)
+        elapsed = time.monotonic() - t0
+        self.assertLess(elapsed, 0.4)   # returned before the 0.5s node finished
         self.assertIn("timed out", str(ctx.exception))
         result = ctx.exception.result
-        self.assertEqual(result.nodes["n2"].status, "done")
-        self.assertEqual(result.nodes["n3"].status, "failed")
+        self.assertEqual(result.nodes["n2"].status, "failed")   # in flight at deadline
+        self.assertIn("timed out", result.nodes["n2"].error)
+        self.assertEqual(result.nodes["n3"].status, "failed")   # never scheduled
         self.assertIn("timed out", result.nodes["n3"].error)
         self.assertEqual(self.mock.requests_to("/v1/images/generations"), [])
 

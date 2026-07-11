@@ -245,5 +245,64 @@ class SourceMediaTest(MockedTest):
         self.assertIn("no audio input", str(ctx.exception))
 
 
+class VideoLoraTest(MockedTest):
+    """Authored LoRAs ride on tvideo/ivideo/vedit submits — but NOT lipsync
+    (play.html passes opts.lora only from those three run()s)."""
+
+    def _complete(self):
+        self.mock.script("POST", "/api/generate-video", {"status": 200, "json": {"runId": "r"}})
+        self.mock.script("GET", "/api/video/status",
+                         video_status("COMPLETED", url="https://cdn/out.mp4", nested=False))
+
+    def test_ltx_lora_rides_on_tvideo_submit(self):
+        self._complete()
+        wf = self.wf_dict({"nodes": [
+            {"id": "n1", "type": "tvideo",
+             "fields": {"model": "ltx-2", "prompt": "p",
+                        "loraUrl": "https://host/v.safetensors", "loraStrength": "0.8"}}]},
+            **FAST)
+        wf.run()
+        body = self.mock.requests_to("/api/generate-video")[0].json
+        self.assertEqual(body["lora_url_1"], "https://host/v.safetensors")
+        self.assertEqual(body["lora_scale_1"], 0.8)
+
+    def test_lipsync_never_sends_lora(self):
+        self._complete()
+        wf = self.wf_dict({"nodes": [
+            {"id": "n1", "type": "upload", "fields": {"image": "data:image/png;base64,IMG="}},
+            {"id": "n2", "type": "aupload", "fields": {"audio": "data:audio/mpeg;base64,AUD="}},
+            {"id": "n3", "type": "lipsync",
+             "fields": {"model": "ltx-avatar", "loraUrl": "https://host/v.safetensors"}},
+        ], "links": [
+            {"id": "l1", "from": {"node": "n1", "port": "image"}, "to": {"node": "n3", "port": "image"}},
+            {"id": "l2", "from": {"node": "n2", "port": "audio"}, "to": {"node": "n3", "port": "audio"}},
+        ]}, **FAST)
+        wf.run()
+        body = self.mock.requests_to("/api/generate-video")[0].json
+        self.assertFalse([k for k in body if "lora" in k.lower()])
+
+
+class PollTransportFailureTest(MockedTest):
+    def test_transient_poll_transport_failure_is_skipped(self):
+        # regression: a network blip on a status GET must NOT abort the paid
+        # in-flight job — SPEC-engine: poll failures silently continue
+        from nanoodle import NanoodleError
+        from nanoodle.transport import default_http
+        state = {"fails": 0}
+
+        def flaky(method, url, headers=None, body=None, timeout=None):
+            if method == "GET" and "/api/video/status" in url and state["fails"] == 0:
+                state["fails"] += 1
+                raise NanoodleError("connection reset")
+            return default_http(method, url, headers=headers, body=body, timeout=timeout)
+
+        self.mock.script("POST", "/api/generate-video", {"status": 200, "json": {"runId": "r"}})
+        self.mock.script("GET", "/api/video/status",
+                         video_status("COMPLETED", url="https://cdn/v.mp4"))
+        wf = self.wf("video-poll.json", http=flaky, **FAST)
+        self.assertEqual(wf.run()["Text→Video"].url, "https://cdn/v.mp4")
+        self.assertEqual(state["fails"], 1)   # the blip really happened
+
+
 if __name__ == "__main__":
     unittest.main()

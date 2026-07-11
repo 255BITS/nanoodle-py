@@ -163,7 +163,10 @@ class FailFastTest(unittest.TestCase):
             raise AssertionError("network call before fail-fast check")
 
         wf = Workflow.load(fixture("unsupported-node.json"), api_key="k", http=spy_http)
-        self.assertEqual(wf.warnings, [])   # load only warns for UNKNOWN types
+        # DESIGN: Workflow.load only WARNS for unsupported types (run fails fast)
+        self.assertEqual(len(wf.warnings), 1)
+        self.assertIn("resize", wf.warnings[0])
+        self.assertIn("not supported by this library yet", wf.warnings[0])
         with self.assertRaises(UnsupportedNodeError) as ctx:
             wf.run()
         msg = str(ctx.exception)

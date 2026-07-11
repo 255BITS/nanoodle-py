@@ -152,6 +152,11 @@ def materialize(data, warnings=None):
             continue
         if ntype not in NODE_TYPES:
             warnings.append("unknown node type %r (node %s) — it cannot be executed" % (ntype, nid))
+        elif NODE_TYPES[ntype].get("unsupported"):
+            warnings.append(
+                "node type %r (node %s) does local media processing that requires the "
+                "nanoodle browser app; not supported by this library yet — run() will fail"
+                % (ntype, nid))
         fields = dict(raw.get("fields") or {})
         nodes[nid] = Node(nid, ntype, fields, raw.get("name"))
 

@@ -203,6 +203,160 @@ def _prompt_of(node, required=True, err="no prompt"):
     return p
 
 
+def _sel_index(node, count):
+    """Baked gallery pick: clamp(parseInt(fields.sel)||0, 0, count-1) (play.html)."""
+    try:
+        sel = int(float(node.fields.get("sel")))
+    except (TypeError, ValueError):
+        sel = 0
+    return min(max(0, sel), count - 1)
+
+
+# ---- LoRA params (play.html normalizeLoraUrl / loraFamily / loraParams) ------
+
+def _normalize_lora_url(raw):
+    u = str(raw or "").strip()
+    if not u:
+        return ""
+    if re.search(r"\b(civitai\.com|civitai\.red|civit\.ai)\b", u, re.I):
+        raise NanoodleError("CivitAI links can't be fetched directly — download the "
+                            ".safetensors and re-host it (e.g. on HuggingFace), then paste that URL.")
+    if re.search(r"(^|//|\.)huggingface\.co/", u, re.I):
+        u = u.replace("/blob/", "/resolve/")
+        if not re.search(r"/resolve/.+\.safetensors(\?|$)", u, re.I):
+            raise NanoodleError("Link the .safetensors file on HuggingFace: open it and use "
+                                "Copy download link (…/resolve/main/your-lora.safetensors).")
+        return u
+    if re.match(r"^[\w.-]+/[\w.-]+$", u):
+        raise NanoodleError("That looks like a HuggingFace repo id — open the .safetensors file "
+                            "and copy its download link (…/resolve/main/your-lora.safetensors).")
+    if not re.match(r"^https?://", u, re.I):
+        raise NanoodleError("LoRA must be a direct https URL to a .safetensors file "
+                            "(HuggingFace or any host).")
+    return u
+
+
+def _lora_family(model):
+    m = str(model or "")
+    if re.search(r"spicy", m, re.I):
+        return None
+    if re.search(r"p-image", m, re.I):
+        return "pimage"
+    if re.search(r"klein", m, re.I):
+        return "flux2klein"
+    if re.search(r"flux-2", m, re.I):
+        return "flux2dev"
+    if re.search(r"z-image", m, re.I):
+        return "zimage"
+    if re.search(r"ltx", m, re.I):
+        return "ltx"
+    if re.search(r"lora", m, re.I):
+        return "flux"
+    return None
+
+
+def _image_takes_lora(model_id):
+    mid = str(model_id or "")
+    if re.search(r"inpaint", mid, re.I):
+        return False
+    if re.search(r"klein", mid, re.I):
+        return True
+    return re.search(r"(^|[-/])lora($|[-/])", mid, re.I) is not None
+
+
+def _model_takes_lora(kind, model_id):
+    if not model_id or _lora_family(model_id) is None:
+        return False
+    return True if kind == "video" else _image_takes_lora(model_id)
+
+
+def _lora_cap(model):
+    fam = _lora_family(model)
+    if fam == "flux2dev":
+        return 4
+    if fam in ("flux2klein", "zimage", "ltx"):
+        return 3
+    return 1  # flux-lora, pimage — single slot
+
+
+def _node_loras(node):
+    f = node.fields
+    if isinstance(f.get("loras"), list):
+        return f["loras"]
+    if str(f.get("loraUrl") or "").strip() or (f.get("loraStrength") or "") != "":
+        return [{"url": f.get("loraUrl") or "", "strength": f.get("loraStrength") or ""}]
+    return []
+
+
+def _lora_scale(strength):
+    if strength is None or strength == "":
+        return 1
+    try:
+        n = float(strength)
+    except (TypeError, ValueError):
+        return 1  # play.html: isNaN → 1
+    return int(n) if n == int(n) else n
+
+
+def _lora_body_for(model, items):
+    fam = _lora_family(model)
+    if fam == "pimage":
+        return {"lora_weights": items[0]["url"], "lora_scale": items[0]["scale"]}
+    if fam in ("flux2dev", "flux2klein", "zimage", "ltx"):
+        body = {}
+        for i, it in enumerate(items):
+            body["lora_url_%d" % (i + 1)] = it["url"]
+            body["lora_scale_%d" % (i + 1)] = it["scale"]
+        return body
+    if len(items) == 1:
+        return {"lora_url": items[0]["url"], "lora_strength": items[0]["scale"]}
+    return {"loras": [{"path": it["url"], "scale": it["scale"]} for it in items]}
+
+
+def _lora_kind(node_type):
+    return "image" if node_type in ("image", "edit", "inpaint") else "video"
+
+
+def _lora_params(node):
+    """Authored LoRAs -> the per-family request keys (play.html loraParams)."""
+    model = node.fields.get("model")
+    if not _model_takes_lora(_lora_kind(node.type), model):
+        return {}
+    rows = [r for r in _node_loras(node)
+            if isinstance(r, dict) and str(r.get("url") or "").strip()]
+    if not rows:
+        return {}
+    items = [{"url": _normalize_lora_url(r.get("url")), "scale": _lora_scale(r.get("strength"))}
+             for r in rows[:_lora_cap(model)]]
+    return _lora_body_for(model, items)
+
+
+# ---- custom-civitai AIR (play.html normalizeCustomCivitaiAir / isValidCustomAir)
+
+_AIR_VALID_RE = re.compile(
+    r"^(civitai:\d+@\d+|persona:\d+@\d+|runware:[^\s@]+@[^\s@]+)$", re.I)
+
+
+def _normalize_custom_civitai_air(raw):
+    s = str(raw or "").strip()
+    if not s:
+        return ""
+    if re.match(r"^civitai:\d+@\d+", s, re.I):
+        return re.sub(r"^civitai:", "civitai:", s, flags=re.I)
+    if re.match(r"^persona:\d+@\d+", s, re.I):
+        return re.sub(r"^persona:", "persona:", s, flags=re.I)
+    if re.match(r"^runware:[^\s@]+@[^\s@]+$", s, re.I):
+        return re.sub(r"^runware:", "runware:", s, flags=re.I)
+    bare = re.match(r"^(\d+)@(\d+)$", s)
+    if bare:
+        return "civitai:%s@%s" % (bare.group(1), bare.group(2))
+    mid = re.search(r"civitai\.com/models/(\d+)", s, re.I)
+    vid = re.search(r"[?&]modelVersionId=(\d+)", s, re.I)
+    if mid and vid:
+        return "civitai:%s@%s" % (mid.group(1), vid.group(1))
+    return s
+
+
 def _collect_ports(inp, rx):
     def idx(name):
         m = re.search(r"(\d+)$", name)
@@ -273,7 +427,8 @@ def _run_llm(engine, node, inp, on_cost):
         messages.append({"role": "system", "content": _fstr(node, "system").strip()})
     messages.append(_build_user_message(prompt, imgs, audio_part))
     body = _chat_body(node, messages)
-    if f.get("maxTokens"):
+    if f.get("maxTokens") and _is_num(f["maxTokens"]):
+        # non-numeric degrades gracefully (play.html: +maxTokens -> NaN -> null)
         body["max_tokens"] = int(float(f["maxTokens"]))
     if f.get("format") == "JSON":
         body["response_format"] = {"type": "json_object"}
@@ -334,7 +489,7 @@ def _run_draw(engine, node, inp, on_cost):
     if show and msg.get("reasoning"):
         text = "```thinking\n%s\n```\n\n%s" % (msg["reasoning"], text)
     refs = [engine._media_ref(u) for u in images]
-    return {"image": refs[0], "images": refs, "text": text}
+    return {"image": refs[_sel_index(node, len(refs))], "images": refs, "text": text}
 
 
 # ---- image family (/v1/images/generations) ---------------------------------
@@ -349,11 +504,20 @@ def _gen_image(engine, node, on_cost, prompt, n=1, image_data_url=None, mask_dat
         body["imageDataUrl"] = image_data_url
     if mask_data_url:
         body["maskDataUrl"] = mask_data_url
+    body.update(_lora_params(node))  # authored LoRAs ride on image/edit/inpaint (imgExtra)
     seed = f.get("seed")
     if seed is not None and str(seed).strip() != "" and _is_num(seed):
         body["seed"] = float(seed) if "." in str(seed) else int(float(seed))
-    if f.get("model") == "custom-civitai" and f.get("customCivitaiAir"):
-        body["customCivitaiAir"] = f["customCivitaiAir"]
+    if f.get("model") == "custom-civitai":
+        # normalize + validate the AIR BEFORE the paid call (play.html imgExtra)
+        air = _normalize_custom_civitai_air(f.get("customCivitaiAir"))
+        if not air:
+            raise NanoodleError("select an AIR model — pick a Runware preset or paste "
+                                "civitai:/runware:/persona:…")
+        if not _AIR_VALID_RE.match(air):
+            raise NanoodleError("AIR must look like civitai:MODEL@VERSION, runware:id@rev, "
+                                "or persona:MODEL@VERSION")
+        body["customCivitaiAir"] = air
     resp = engine._post_json(IMG_ENDPOINT, body)
     j = json.loads(resp.text())
     urls = []
@@ -375,7 +539,7 @@ def _run_image(engine, node, inp, on_cost):
     except (TypeError, ValueError):
         want = 1
     urls = _gen_image(engine, node, on_cost, prompt, n=want)
-    return {"image": urls[0], "images": urls}
+    return {"image": urls[_sel_index(node, len(urls))], "images": urls}
 
 
 def _run_edit(engine, node, inp, on_cost):
@@ -425,6 +589,9 @@ def _gen_video(engine, node, on_cost, prompt, extra_body):
     dims = _video_dims(node)
     body.update(dims)
     body.update(extra_body.pop("_sources", {}))
+    if node.type in ("tvideo", "ivideo", "vedit"):
+        # authored LoRAs (play.html: only these runs pass opts.lora to genVideo)
+        body.update(_lora_params(node))
     model_opts = node.fields.get("modelOpts") or {}
     if isinstance(model_opts, dict):
         body.update(model_opts)
@@ -439,11 +606,11 @@ def _gen_video(engine, node, on_cost, prompt, extra_body):
     t0 = time.monotonic()
     while time.monotonic() - t0 < engine.timeout_video:
         time.sleep(engine.poll_video)
-        resp = engine._get(VIDEO_STATUS + "?requestId=" + urllib.parse.quote(str(run_id)))
         try:
+            resp = engine._get(VIDEO_STATUS + "?requestId=" + urllib.parse.quote(str(run_id)))
             s = json.loads(resp.text())
-        except ValueError:
-            continue  # poll failures: silently continue until timeout
+        except (NanoodleError, ValueError):
+            continue  # poll failures (transport OR body): silently continue until timeout
         if not (200 <= resp.status < 300):
             continue
         data = s.get("data") if isinstance(s.get("data"), dict) else None
@@ -573,11 +740,11 @@ def _poll_audio(engine, node, model, submit_json):
     t0 = time.monotonic()
     while time.monotonic() - t0 < engine.timeout_audio:
         time.sleep(engine.poll_audio)
-        resp = engine._get(AUDIO_STATUS + "?" + query)
         try:
+            resp = engine._get(AUDIO_STATUS + "?" + query)
             s = json.loads(resp.text())
-        except ValueError:
-            continue
+        except (NanoodleError, ValueError):
+            continue  # poll failures (transport OR body): silently continue until timeout
         st = str(s.get("status") or "").lower()
         engine._progress({"type": "poll", "node_id": node.id, "name": display_name(node),
                           "status": st, "queue": s.get("queuePosition"),
