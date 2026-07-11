@@ -139,6 +139,27 @@ class MediaInputCoercionTest(unittest.TestCase):
             self._upload_wf().run({"Audio": 42})
         self.assertIn("expects media", str(ctx.exception))
 
+    def test_plain_string_media_input_refused_before_any_network_call(self):
+        # "clip.mp3" riding verbatim into a paid request body is a charged garbage
+        # call — refuse at coercion, before anything runs (JS coerceMediaInput parity)
+        wf = Workflow.from_dict({"nodes": [
+            {"id": "n1", "type": "aupload", "fields": {}},
+        ]}, http=tripwire_http)
+        with self.assertRaises(NanoodleError) as ctx:
+            wf.run({"Audio": "clip.mp3"})
+        self.assertIn("media_from_file", str(ctx.exception))
+        self.assertIn("clip.mp3", str(ctx.exception))
+        # data:/http(s) URL strings still pass verbatim
+        result = self._upload_wf().run({"Audio": "https://cdn.example/clip.mp3"})
+        self.assertEqual(result["Audio input"].url, "https://cdn.example/clip.mp3")
+
+    def test_oversized_data_url_media_input_refused_at_coercion(self):
+        from nanoodle.media import MEDIA_INLINE_MAX
+        big = "data:audio/mpeg;base64," + "A" * MEDIA_INLINE_MAX
+        with self.assertRaises(NanoodleError) as ctx:
+            self._upload_wf().run({"Audio": big})
+        self.assertIn("too large", str(ctx.exception))
+
 
 class FailFastTest(unittest.TestCase):
     def test_no_api_key_with_network_nodes_fails_upfront(self):

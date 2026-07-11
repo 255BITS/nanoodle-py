@@ -241,6 +241,23 @@ class LlmParseTest(MockedTest):
             wf.run()
         self.assertIn("no text in response", str(ctx.exception))
 
+    def test_empty_string_content_is_error(self):
+        # SPEC-engine: null/EMPTY content both throw (JS client.chat parity)
+        self.mock.script("POST", "/api/v1/chat/completions", chat_response(""))
+        wf = self.wf_dict({"nodes": [
+            {"id": "n1", "type": "llm", "fields": {"model": "m", "prompt": "p"}}]})
+        with self.assertRaises(RunError) as ctx:
+            wf.run()
+        self.assertIn("no text in response", str(ctx.exception))
+
+    def test_content_parts_joining_to_empty_still_passes(self):
+        # the empty check runs BEFORE the list-join (JS parity): [] -> "" is allowed
+        self.mock.script("POST", "/api/v1/chat/completions",
+                         chat_response(None, content_parts=[{"type": "text", "text": ""}]))
+        wf = self.wf_dict({"nodes": [
+            {"id": "n1", "type": "llm", "fields": {"model": "m", "prompt": "p"}}]})
+        self.assertEqual(wf.run()["LLM"], "")
+
     def test_show_thinking_wraps_reasoning(self):
         self.mock.script("POST", "/api/v1/chat/completions",
                          chat_response("answer", reasoning="chain of thought"))
@@ -345,6 +362,17 @@ class DrawTest(MockedTest):
         with self.assertRaises(RunError) as ctx:
             wf.run()
         self.assertIn("replied with text, not an image", str(ctx.exception))
+
+    def test_text_only_reply_still_records_the_charge(self):
+        # the call billed even though it failed the node — cost must survive (JS parity)
+        self.mock.script("POST", "/api/v1/chat/completions",
+                         chat_response("just words", cost_usd=0.001))
+        wf = self.wf_dict({"nodes": [
+            {"id": "n1", "type": "draw", "fields": {"model": "m", "prompt": "p"}}]})
+        with self.assertRaises(RunError) as ctx:
+            wf.run()
+        self.assertAlmostEqual(ctx.exception.result.cost_usd, 0.001)
+        self.assertAlmostEqual(ctx.exception.result.nodes["n1"].cost_usd, 0.001)
 
     def test_empty_reply_is_no_image_error(self):
         self.mock.script("POST", "/api/v1/chat/completions",

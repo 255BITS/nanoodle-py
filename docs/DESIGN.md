@@ -53,7 +53,7 @@ result.outputs, result.cost_usd, result.cost_exact, result.remaining_balance, re
 - run() input validation UPFRONT: unknown input key → error listing valid keys; missing required input with empty field default → error naming it; no API key while graph has network nodes → error BEFORE any node runs.
 - Unsupported node types (resize/vframes/combine/soundtrack/trim/extractaudio) and unknown types that must RUN → UnsupportedNodeError at run start (fail fast, before spending), naming node + type. Workflow.load only warns.
 - No locale suffix, no catalog fetch, no seed skip-cache, no telemetry/analytics of ANY kind. Never log the API key. Media over 4.4MB inline → clear local error.
-- Version: 0.1.0.
+- Version: 0.1.1.
 
 ## Repo layout (each)
 README.md (quickstart: download the save from https://nanoodle.io → 3-line usage; the starter-graph example; supported node matrix; cost note; link to nanoodle app)

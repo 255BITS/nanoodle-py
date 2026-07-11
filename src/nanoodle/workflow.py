@@ -2,6 +2,7 @@
 
 import copy
 import json
+import re
 import threading
 import time
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
@@ -12,7 +13,7 @@ from .graph import (NODE_TYPES, classify_inbound, display_name, materialize,
                     topo_order)
 from .iodef import (derive_inputs, derive_outputs, derive_settings,
                     resolve_input_key, resolve_setting_key)
-from .media import MediaRef, make_data_url
+from .media import MEDIA_INLINE_MAX, MediaRef, make_data_url
 from .transport import default_http, resolve_api_key
 
 _UNSUPPORTED_MSG = ("node type '%s' does local media processing that requires the "
@@ -224,21 +225,35 @@ class Workflow(object):
     @staticmethod
     def _coerce_input(spec, value):
         if isinstance(value, MediaRef):
-            return value.url
-        if isinstance(value, (bytes, bytearray)):
-            return make_data_url(bytes(value))
-        if isinstance(value, dict) and "data" in value:
-            return make_data_url(value["data"], value.get("mime"))
+            value = value.url
+        elif isinstance(value, (bytes, bytearray)):
+            value = make_data_url(bytes(value))
+        elif isinstance(value, dict) and "data" in value:
+            value = make_data_url(value["data"], value.get("mime"))
         if spec.kind == "choice":
             v = str(value)
             if spec.options and v not in spec.options:
                 raise NanoodleError("invalid choice %r for %s — options: %s"
                                     % (v, spec.key, ", ".join(spec.options)))
             return v
-        if spec.kind in ("image", "audio", "video") and not isinstance(value, str):
-            raise NanoodleError(
-                "input %s expects media: pass a data:/https URL string, bytes, "
-                "{'data': bytes, 'mime': ...} or media_from_file(path)" % spec.key)
+        if spec.kind in ("image", "audio", "video"):
+            if not isinstance(value, str):
+                raise NanoodleError(
+                    "input %s expects media: pass a data:/https URL string, bytes, "
+                    "{'data': bytes, 'mime': ...} or media_from_file(path)" % spec.key)
+            # a bare filename/path would ride verbatim into a PAID request body —
+            # refuse anything that isn't a data:/http(s) URL before spending
+            if not re.match(r"^(data:|https?:)", value, re.I):
+                raise NanoodleError(
+                    "input %s: expected a data: URL, an http(s) URL, bytes, or "
+                    "media_from_file(path) — got a plain string. For a local file use "
+                    "media_from_file(%r)." % (spec.key, value[:60]))
+            if value[:5].lower() == "data:" and len(value) > MEDIA_INLINE_MAX:
+                raise NanoodleError(
+                    "input %s: media is too large to send inline (~4 MB max). nanoodle "
+                    "sends media as base64 in the request body (NanoGPT has no upload "
+                    "endpoint) — use a smaller file." % spec.key)
+            return value
         return str(value)
 
     def _execute(self, graph, order, timeout, on_progress):

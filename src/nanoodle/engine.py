@@ -422,7 +422,7 @@ def _build_user_message(prompt, imgs, audio_part=None):
 def _parse_chat_text(j, show_thinking=False):
     msg = ((j.get("choices") or [{}])[0] or {}).get("message") or {}
     txt = msg.get("content")
-    if txt is None:
+    if txt is None or txt == "":  # SPEC-engine: null/EMPTY content both error
         raise NanoodleError("no text in response")
     if isinstance(txt, list):
         txt = "".join(p.get("text") or "" for p in txt)
@@ -494,6 +494,8 @@ def _run_draw(engine, node, inp, on_cost):
     messages.append(_build_user_message(prompt, imgs))
     resp = engine._post_json(CHAT_ENDPOINT, _chat_body(node, messages))
     j = json.loads(resp.text())
+    # record the charge FIRST — a text-only reply still billed the call
+    on_cost(*engine._cost_with_headers(j, resp))
     msg = ((j.get("choices") or [{}])[0] or {}).get("message") or {}
     images = []
     for im in (msg.get("images") or []):
@@ -512,7 +514,6 @@ def _run_draw(engine, node, inp, on_cost):
         raise NanoodleError(
             "this model replied with text, not an image — pick an image-output model"
             if text else "no image in response")
-    on_cost(*engine._cost_with_headers(j, resp))
     show = node.fields.get("showThinking") not in (False, "false")
     if show and msg.get("reasoning"):
         text = "```thinking\n%s\n```\n\n%s" % (msg["reasoning"], text)

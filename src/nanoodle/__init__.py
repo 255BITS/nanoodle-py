@@ -13,7 +13,7 @@ from .iodef import InputSpec, OutputSpec, SettingSpec
 from .media import MediaRef, media_from_file
 from .workflow import NodeRun, RunResult, Workflow
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 __all__ = [
     "Workflow", "RunResult", "NodeRun",
