@@ -7,6 +7,7 @@ import json
 import os
 import tempfile
 import unittest
+import unittest.mock
 
 from tests import fixture
 from tests._util import MockedTest
@@ -38,6 +39,63 @@ class InspectTest(unittest.TestCase):
         self.assertIn("n2.model", out)
         self.assertIn("Nodes:", out)
         self.assertIn("n3", out)
+
+
+class EnvFileTest(MockedTest):
+    def _write_env(self, d, body):
+        path = os.path.join(d, ".env")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(body)
+        return path
+
+    def test_run_reads_key_from_env_file(self):
+        self.mock.script("POST", "/api/v1/chat/completions", chat_response("a vivid prompt"))
+        self.mock.script("POST", "/v1/images/generations", image_response(b64_list=[PNG_B64]))
+        with tempfile.TemporaryDirectory() as d:
+            env_path = self._write_env(d, "# comment\nNANOGPT_API_KEY=key-from-file\n")
+            with unittest.mock.patch.dict(os.environ, {}, clear=False):
+                os.environ.pop("NANOGPT_API_KEY", None)
+                code, _, _ = run_cli(["run", fixture("starter-graph.json"),
+                                      "--base-url", self.mock.base_url,
+                                      "--env-file", env_path,
+                                      "--input", "Text=x", "--json"])
+        self.assertEqual(code, 0)
+        chat = self.mock.requests_to("/api/v1/chat/completions")[0]
+        self.assertEqual(chat.headers.get("authorization"), "Bearer key-from-file")
+
+    def test_existing_env_var_wins_over_env_file(self):
+        self.mock.script("POST", "/api/v1/chat/completions", chat_response("a vivid prompt"))
+        self.mock.script("POST", "/v1/images/generations", image_response(b64_list=[PNG_B64]))
+        with tempfile.TemporaryDirectory() as d:
+            env_path = self._write_env(d, 'NANOGPT_API_KEY="file-key"\n')
+            with unittest.mock.patch.dict(os.environ, {"NANOGPT_API_KEY": "env-key"}):
+                code, _, _ = run_cli(["run", fixture("starter-graph.json"),
+                                      "--base-url", self.mock.base_url,
+                                      "--env-file", env_path,
+                                      "--input", "Text=x", "--json"])
+        self.assertEqual(code, 0)
+        chat = self.mock.requests_to("/api/v1/chat/completions")[0]
+        self.assertEqual(chat.headers.get("authorization"), "Bearer env-key")
+
+    def test_missing_env_file_exits_1_before_any_call(self):
+        code, _, err = run_cli(["run", fixture("starter-graph.json"),
+                                "--base-url", self.mock.base_url,
+                                "--env-file", "/nonexistent/.env",
+                                "--input", "Text=x"])
+        self.assertEqual(code, 1)
+        self.assertIn("env-file", err)
+        self.assertEqual(self.mock.requests, [])
+
+    def test_inspect_accepts_env_file(self):
+        with tempfile.TemporaryDirectory() as d:
+            env_path = self._write_env(d, "export NANOGPT_API_KEY=inspect-key\n")
+            with unittest.mock.patch.dict(os.environ, {}, clear=False):
+                os.environ.pop("NANOGPT_API_KEY", None)
+                code, out, _ = run_cli(["inspect", fixture("starter-graph.json"),
+                                        "--env-file", env_path])
+                self.assertEqual(os.environ.get("NANOGPT_API_KEY"), "inspect-key")
+        self.assertEqual(code, 0)
+        self.assertIn("Inputs:", out)
 
 
 class RunCliTest(MockedTest):

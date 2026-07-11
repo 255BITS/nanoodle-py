@@ -34,6 +34,23 @@ def _parse_kv(pairs, what):
     return out
 
 
+def _load_env_file(path):
+    """Load KEY=VALUE lines (.env style) into os.environ; existing env wins."""
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+    except OSError as e:
+        raise NanoodleError("cannot read --env-file %r: %s" % (path, e.strerror or e))
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        if key.startswith("export "):
+            key = key[len("export "):]
+        os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
+
+
 def _fmt_default(v):
     if v is None:
         return ""
@@ -152,6 +169,9 @@ def main(argv=None):
     p_run.add_argument("--out", metavar="DIR", help="save media outputs into DIR")
     p_run.add_argument("--json", action="store_true", help="print a machine-readable result")
     p_run.add_argument("--api-key", default=None, help="NanoGPT API key (default: $NANOGPT_API_KEY)")
+    p_run.add_argument("--env-file", default=None, metavar="PATH",
+                       help="read NANOGPT_API_KEY (and other vars) from a .env-style file; "
+                            "existing environment variables win")
     p_run.add_argument("--base-url", default=None)
     p_run.add_argument("--timeout", type=float, default=None, help="overall run timeout (seconds)")
     p_run.set_defaults(fn=cmd_run)
@@ -159,10 +179,15 @@ def main(argv=None):
     p_ins = sub.add_parser("inspect", help="print inputs/outputs/settings + node table")
     p_ins.add_argument("graph")
     p_ins.add_argument("--api-key", default=None)
+    p_ins.add_argument("--env-file", default=None, metavar="PATH",
+                       help="read NANOGPT_API_KEY (and other vars) from a .env-style file; "
+                            "existing environment variables win")
     p_ins.set_defaults(fn=cmd_inspect)
 
     args = parser.parse_args(argv)
     try:
+        if getattr(args, "env_file", None):
+            _load_env_file(args.env_file)
         return args.fn(args)
     except NanoodleError as e:
         print("error: %s" % e, file=sys.stderr)

@@ -1,0 +1,5 @@
+# sdist contents: package sources + docs; tests stay in the repo
+# (the default template would ship tests/test_*.py without their
+# harness/fixtures — a broken subset, so exclude them entirely)
+prune tests
+recursive-include docs *.md

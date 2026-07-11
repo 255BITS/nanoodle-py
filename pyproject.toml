@@ -5,12 +5,22 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "nanoodle"
 version = "0.1.0"
-description = "Re-execute nanoodle (nanoodle.io) AI workflow saves against the NanoGPT API — zero dependencies"
+description = "Run nanoodle visual AI workflows from Python — zero-dependency executor for saved noodle-graph.json files"
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.9"
-authors = [{ name = "nanoodle contributors" }]
-keywords = ["nanoodle", "nanogpt", "workflow", "ai", "image", "video", "audio"]
+authors = [{ name = "255BITS" }]
+keywords = [
+    "nanoodle",
+    "nanogpt",
+    "workflow",
+    "ai",
+    "generative",
+    "image",
+    "video",
+    "audio",
+    "llm",
+]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
@@ -22,14 +32,17 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Multimedia :: Graphics",
 ]
 dependencies = []
 
 [project.urls]
 Homepage = "https://nanoodle.io"
+Repository = "https://github.com/255BITS/nanoodle-py"
 
 [project.scripts]
-nanoodle = "nanoodle.__main__:main"
+nanoodle-py = "nanoodle.__main__:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
