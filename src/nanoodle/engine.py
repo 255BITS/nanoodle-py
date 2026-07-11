@@ -366,10 +366,18 @@ def _collect_ports(inp, rx):
 
 
 def _audio_input_part(url):
-    """Wired audio data: URL -> OpenAI-style input_audio part (play.html audioInputPart)."""
+    """Wired audio data: URL -> OpenAI-style input_audio part (play.html audioInputPart).
+
+    Callers must inline https URLs first (engine.fetch_media) — SPEC-engine
+    mandates base64 bytes ("data:<base64 body, no data: prefix>"), and shipping
+    a raw URL string as "base64 data" makes a paid call with garbage audio.
+    """
     url = _as_url(url)
     if not url:
         return None
+    if not re.match(r"^data:", url, re.I):
+        raise NanoodleError("audio input must be a data: URL — download the clip "
+                            "and inline it before building the chat part")
     if len(url) > MEDIA_INLINE_MAX:
         raise NanoodleError("audio clip is too large to inline (~4 MB send limit) — use a shorter clip")
     comma = url.find(",")
@@ -390,7 +398,13 @@ def _chat_body(node, messages):
     f = node.fields
     body = {"model": _mdl(node), "messages": messages}
     t = f.get("temperature")
-    body["temperature"] = float(t) if (t is not None and str(t) != "") else 0.8
+    if t is not None and str(t) != "":
+        # int-normalize whole values so a typed "1" serializes as 1, not 1.0
+        # (JS `+temperature` -> 1) — keeps request bodies byte-identical
+        num = float(t)
+        body["temperature"] = int(num) if num == int(num) else num
+    else:
+        body["temperature"] = 0.8
     return body
 
 
@@ -417,11 +431,25 @@ def _parse_chat_text(j, show_thinking=False):
     return txt
 
 
+def _inline_hosted_audio(engine, url):
+    """Hosted audio (music/tts nodes return https CDN URLs verbatim) -> download
+    and inline as a data: URL: the chat input_audio part carries bytes, never a
+    URL (mirrors JS client.fetchMediaDataUrl)."""
+    data, ctype = engine.fetch_media(url)
+    mime = (ctype or "").split(";")[0].strip().lower()
+    if not mime or mime in ("application/octet-stream", "binary/octet-stream"):
+        mime = None  # make_data_url sniffs magic bytes when the CDN's type is generic
+    return make_data_url(data, mime)
+
+
 def _run_llm(engine, node, inp, on_cost):
     f = node.fields
     prompt = _prompt_of(node)
     imgs = _collect_ports(inp, IMG_PORT_RE)
-    audio_part = _audio_input_part(inp["audio"]) if inp.get("audio") else None
+    audio_src = _as_url(inp["audio"]) if inp.get("audio") else None
+    if audio_src and re.match(r"^https?:", audio_src, re.I):
+        audio_src = _inline_hosted_audio(engine, audio_src)
+    audio_part = _audio_input_part(audio_src) if audio_src else None
     messages = []
     if _fstr(node, "system").strip():
         messages.append({"role": "system", "content": _fstr(node, "system").strip()})

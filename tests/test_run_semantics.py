@@ -86,9 +86,9 @@ class OverallTimeoutTest(MockedTest):
         self.assertLess(elapsed, 0.4)   # returned before the 0.5s node finished
         self.assertIn("timed out", str(ctx.exception))
         result = ctx.exception.result
-        self.assertEqual(result.nodes["n2"].status, "failed")   # in flight at deadline
+        self.assertEqual(result.nodes["n2"].status, "error")   # in flight at deadline
         self.assertIn("timed out", result.nodes["n2"].error)
-        self.assertEqual(result.nodes["n3"].status, "failed")   # never scheduled
+        self.assertEqual(result.nodes["n3"].status, "error")   # never scheduled
         self.assertIn("timed out", result.nodes["n3"].error)
         self.assertEqual(self.mock.requests_to("/v1/images/generations"), [])
 

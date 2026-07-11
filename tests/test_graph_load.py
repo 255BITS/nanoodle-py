@@ -127,13 +127,18 @@ class TopoOrderTest(unittest.TestCase):
         self.assertEqual(topo_order(wf.graph), ["n1", "n2"])
         self.assertEqual(wf.run()["Join"], "hi+hi")
 
-    def test_comment_nodes_never_run(self):
+    def test_comment_nodes_never_run_but_are_recorded_skipped(self):
+        # cross-language parity: comment nodes appear in result.nodes with
+        # status 'skipped' (never executed), same as the JS library
         wf = Workflow.from_dict({"nodes": [
             {"id": "n1", "type": "text", "fields": {"text": "hi"}},
             {"id": "n2", "type": "comment", "fields": {"text": "a note"}},
         ]}, api_key="k")
         result = wf.run()
-        self.assertNotIn("n2", result.nodes)
+        self.assertIn("n2", result.nodes)
+        self.assertEqual(result.nodes["n2"].status, "skipped")
+        self.assertIsNone(result.nodes["n2"].out)
+        self.assertIsNone(result.nodes["n2"].error)
         self.assertEqual(result["Text"], "hi")
 
 

@@ -20,7 +20,7 @@ _UNSUPPORTED_MSG = ("node type '%s' does local media processing that requires th
 
 
 class NodeRun(object):
-    """Per-node run record: status ('done'|'failed'|'skipped'), out, error, cost, ms."""
+    """Per-node run record: status ('done'|'error'|'skipped'), out, error, cost, ms."""
 
     __slots__ = ("status", "out", "error", "cost_usd", "ms")
 
@@ -140,23 +140,33 @@ class Workflow(object):
         # 1. upfront input validation & application
         specs = self.inputs
         supplied = self._normalize_inputs(inputs, specs)
+        explicit = set()   # id() of every spec the caller supplied a value for
         for key, value in supplied.items():
             spec = resolve_input_key(specs, key, graph)
             graph.node(spec.node_id).fields[spec.field] = self._coerce_input(spec, value)
+            explicit.add(id(spec))
         for key, value in (settings or {}).items():
             sspec = resolve_setting_key(self.settings, key, graph)
             graph.node(sspec.node_id).fields[sspec.field] = value
 
-        # 2. missing required inputs (empty field default) -> error naming them
+        # 2. backfill spec defaults into empty fields (play.html run() applies
+        #    it.def — e.g. the llm default system prompt), then error on missing
+        #    required inputs
         missing = []
         for spec in specs:
-            if spec.optional:
-                continue
-            v = graph.node(spec.node_id).fields.get(spec.field)
-            if spec.kind == "choice":
-                continue  # falls back to the first option at run time
+            fields = graph.node(spec.node_id).fields
+            v = fields.get(spec.field)
             if v is None or str(v).strip() == "":
-                missing.append(spec.key)
+                # an EXPLICIT empty value clears an optional input (e.g. run with
+                # no system prompt) — the default only backfills when the key
+                # wasn't supplied at all (the app's prefilled textarea)
+                if spec.optional and id(spec) in explicit:
+                    continue
+                if spec.default is not None and str(spec.default) != "":
+                    fields[spec.field] = spec.default
+                elif not spec.optional and spec.kind != "choice":
+                    # choice falls back to the first option at run time
+                    missing.append(spec.key)
         if missing:
             raise NanoodleError("missing required input%s: %s"
                                 % ("s" if len(missing) > 1 else "", ", ".join(missing)))
@@ -234,6 +244,13 @@ class Workflow(object):
     def _execute(self, graph, order, timeout, on_progress):
         deadline = (time.monotonic() + timeout) if timeout else None
         runs = {nid: NodeRun() for nid in order}
+        for nid, n in graph.nodes.items():
+            # comment nodes never run but ARE recorded (status 'skipped'),
+            # matching the JS result.nodes shape
+            if nid not in runs and n.spec().get("note"):
+                rec = NodeRun()
+                rec.status = "skipped"
+                runs[nid] = rec
         lock = threading.Lock()
         cost = {"total": 0.0, "exact": True, "balance": None, "any": False}
 
@@ -303,16 +320,16 @@ class Workflow(object):
                             continue
                         run = runs[nid]
                         failed_dep = next((d for d in deps[nid]
-                                           if runs[d].status == "failed"), None)
+                                           if runs[d].status == "error"), None)
                         if timed_out:
                             # timeout wins the message — an upstream marked
                             # failed BY the timeout must not relabel this node
-                            run.status = "failed"
+                            run.status = "error"
                             run.error = "run timed out after %ss" % timeout
                             settled.add(nid)
                             progressed = True
                         elif failed_dep is not None:
-                            run.status = "failed"
+                            run.status = "error"
                             run.error = "upstream failed: " + display_name(graph.node(failed_dep))
                             settled.add(nid)
                             progress({"type": "node-error", "node_id": nid,
@@ -337,7 +354,7 @@ class Workflow(object):
                     abandoned = True
                     for fut, nid in list(pending.items()):
                         run = runs[nid]
-                        run.status = "failed"
+                        run.status = "error"
                         run.error = "run timed out after %ss" % timeout
                         settled.add(nid)
                         progress({"type": "node-error", "node_id": nid,
@@ -358,7 +375,7 @@ class Workflow(object):
                                   "name": display_name(node), "ms": run.ms,
                                   "cost_usd": run.cost_usd})
                     except Exception as e:  # noqa: BLE001 - collected per node
-                        run.status = "failed"
+                        run.status = "error"
                         run.error = str(e)
                         progress({"type": "node-error", "node_id": nid,
                                   "name": display_name(node), "error": run.error})
@@ -383,7 +400,7 @@ class Workflow(object):
                 failed_sinks.append((ospec, run))
         errors = [{"node_id": nid, "name": display_name(graph.node(nid)),
                    "message": runs[nid].error}
-                  for nid in order if runs[nid].status == "failed"]
+                  for nid in order if runs[nid].status == "error"]
         result = RunResult(outputs, runs, errors,
                            cost_usd=cost["total"],
                            cost_exact=cost["exact"],

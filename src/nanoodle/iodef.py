@@ -61,7 +61,7 @@ INPUT_SPECS = {
 
 # SETTING_SPECS (play.html 3234-3310) — per-node knobs that are not IO shape.
 _ASPECTS = ["16:9", "9:16", "1:1", "4:3", "3:4"]
-_SIZES = ["1024x1024", "1024x1536", "1536x1024", "512x512", "1k", "2k", "4k"]
+_SIZES = ["1024x1024", "1024x1536", "1536x1024", "auto"]   # play.html SIZES verbatim
 SETTING_SPECS = {
     "llm": [("model", "Model", "model", None, None),
             ("temperature", "Temperature", "number", "0.8", None),
@@ -166,7 +166,8 @@ def derive_inputs(graph):
 
 
 def _assign_input_keys(inputs):
-    """key = friendly name when unique, else 'nodeId.field'.
+    """key = friendly name; duplicates get ' 2', ' 3' suffixes (case-insensitive),
+    matching JS deriveInputs and SPEC-io's duplicate-key suffixing.
 
     Friendly name: the node's custom name when the node contributes exactly one
     REQUIRED input (PR #138 flat-label rule), else the generic label.
@@ -174,17 +175,18 @@ def _assign_input_keys(inputs):
     per_node = {}
     for spec in inputs:
         per_node.setdefault(spec.node_id, []).append(spec)
-    candidates = []
+    used = {}
     for spec in inputs:
         node_inputs = per_node[spec.node_id]
         required = [s for s in node_inputs if not s.optional]
         if spec.node_name and len(required) == 1 and required[0] is spec:
-            candidates.append(spec.node_name)
+            cand = spec.node_name
         else:
-            candidates.append(spec.label)
-    lowered = [c.strip().lower() for c in candidates]
-    for spec, cand, low in zip(inputs, candidates, lowered):
-        spec.key = cand if lowered.count(low) == 1 else "%s.%s" % (spec.node_id, spec.field)
+            cand = spec.label
+        low = cand.strip().lower()
+        count = used.get(low, 0) + 1
+        used[low] = count
+        spec.key = cand if count == 1 else "%s %d" % (cand, count)
 
 
 def derive_outputs(graph):
@@ -234,14 +236,19 @@ def _norm(s):
 
 def resolve_input_key(inputs, key, graph):
     """Resolution order (case-insensitive, trimmed):
-    1. exact node custom name (node has exactly one derived input -> it; else ambiguous)
-    2. "nodeId.field", and bare nodeId when the node has a single input
-    3. the input's key / label / field name when unique across inputs
+    1. the input's assigned key (the very name wf.inputs advertises)
+    2. exact node custom name (node has exactly one derived input -> it; else ambiguous)
+    3. "nodeId.field", and bare nodeId when the node has a single input
+    4. the input's label / field name when unique across inputs
     """
     k = _norm(key)
     if not k:
         raise NanoodleError("empty input name")
-    # 1. custom node name
+    # 1. assigned key (unique modulo case; suffixed keys like "Text 2" live here)
+    by_key = [s for s in inputs if _norm(s.key) == k]
+    if len(by_key) == 1:
+        return by_key[0]
+    # 2. custom node name
     named = [s for s in inputs if s.node_name and _norm(s.node_name) == k]
     if named:
         if len(named) == 1:
@@ -260,7 +267,7 @@ def resolve_input_key(inputs, key, graph):
         raise NanoodleError(
             "input name %r is ambiguous — use one of: %s"
             % (key, ", ".join("%s.%s" % (s.node_id, s.field) for s in named)))
-    # 2. nodeId.field / bare nodeId
+    # 3. nodeId.field / bare nodeId
     if "." in k:
         nid, _, fld = k.partition(".")
         hit = [s for s in inputs if _norm(s.node_id) == nid and _norm(s.field) == fld]
@@ -273,7 +280,7 @@ def resolve_input_key(inputs, key, graph):
         raise NanoodleError(
             "input name %r is ambiguous — use one of: %s"
             % (key, ", ".join("%s.%s" % (s.node_id, s.field) for s in by_node)))
-    # 3. key / label / field name when unique
+    # 4. key / label / field name when unique
     for attr in ("key", "label", "field"):
         hit = [s for s in inputs if _norm(getattr(s, attr)) == k]
         if len(hit) == 1:
@@ -290,16 +297,26 @@ def resolve_input_key(inputs, key, graph):
 def resolve_setting_key(settings, key, graph):
     k = _norm(key)
     if "." in k:
+        # the dot-form head matches node id, custom name AND display name
+        # ("Writer.model" / "Speech.voice"), mirroring JS resolveSettingKey
         nid, _, fld = k.partition(".")
-        hit = [s for s in settings if _norm(s.node_id) == nid and _norm(s.field) == fld]
+        nodes = [n for n in graph.nodes.values()
+                 if _norm(n.id) == nid
+                 or (n.name and _norm(n.name) == nid)
+                 or _norm(display_name(n)) == nid]
+        node_ids = set(n.id for n in nodes)
+        hit = [s for s in settings if s.node_id in node_ids and _norm(s.field) == fld]
         if len(hit) == 1:
             return hit[0]
-        # a real node.field that is wired gets a dedicated refusal
-        node = graph.node(nid) or next(
-            (n for n in graph.nodes.values() if _norm(n.id) == nid), None)
-        if node is not None and graph.port_is_fed(node.id, fld):
+        if len(hit) > 1:
             raise NanoodleError(
-                "setting %r is wired — a link decides it upstream, it cannot be overridden" % key)
+                "setting name %r is ambiguous — use one of: %s"
+                % (key, ", ".join(s.key for s in hit)))
+        # a real node.field that is wired gets a dedicated refusal
+        for node in nodes:
+            if any(l.to_node == node.id and _norm(l.to_port) == fld for l in graph.links):
+                raise NanoodleError(
+                    "setting %r is wired — a link decides it upstream, it cannot be overridden" % key)
     named = [s for s in settings
              if (s.node_name and _norm(s.node_name) == k) or _norm(s.key) == k]
     if len(named) == 1:

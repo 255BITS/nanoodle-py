@@ -71,11 +71,18 @@ class InputDerivationTest(unittest.TestCase):
         self.assertIn("Persona", keys)   # PR #138 flat-label rule
         self.assertIn("Prompt", keys)    # n2's unwired prompt keeps its generic label
 
-    def test_duplicate_labels_fall_back_to_node_field_keys(self):
+    def test_duplicate_labels_get_numeric_suffixes(self):
+        # cross-language parity: duplicate input labels are suffixed ' 2', ' 3'
+        # (like output keys, SPEC-io), matching the JS library — NOT renamed to
+        # nodeId.field, which made wf.inputs keys differ between languages
         wf = Workflow.load(fixture("duplicate-names.json"), api_key="k")
         keys = sorted(s.key for s in wf.inputs)
-        self.assertIn("n1.text", keys)
-        self.assertIn("n2.text", keys)
+        self.assertEqual(keys, ["System prompt", "System prompt 2", "Text", "Text 2"])
+        # friendly keys stay addressable and resolve in derivation order
+        first = resolve_input_key(wf.inputs, "Text", wf.graph)
+        self.assertEqual((first.node_id, first.field), ("n1", "text"))
+        second = resolve_input_key(wf.inputs, "text 2", wf.graph)   # case-insensitive
+        self.assertEqual((second.node_id, second.field), ("n2", "text"))
 
 
 class KeyResolutionTest(unittest.TestCase):
@@ -119,18 +126,20 @@ class KeyResolutionTest(unittest.TestCase):
         spec = resolve_input_key(wf.inputs, "Poet", wf.graph)
         self.assertEqual((spec.node_id, spec.field), ("n1", "prompt"))
 
-    def test_custom_name_ambiguous_across_two_nodes(self):
-        # two DIFFERENT nodes sharing one name stay ambiguous
+    def test_same_custom_name_on_two_nodes_resolves_by_advertised_key(self):
+        # two DIFFERENT nodes sharing one name: keys are suffixed ("Poet",
+        # "Poet 2") and each ADVERTISED key resolves to its own node — the
+        # assigned-key check runs before the custom-name check (JS parity)
         wf = Workflow.from_dict({"nodes": [
             {"id": "n1", "type": "llm", "fields": {"model": "m"}, "name": "Poet"},
             {"id": "n2", "type": "image", "fields": {"model": "m"}, "name": "Poet"}]},
             api_key="k")
-        with self.assertRaises(NanoodleError) as ctx:
-            resolve_input_key(wf.inputs, "Poet", wf.graph)
-        msg = str(ctx.exception)
-        self.assertIn("ambiguous", msg)
-        self.assertIn("n1.prompt", msg)
-        self.assertIn("n2.prompt", msg)
+        self.assertEqual([s.key for s in wf.inputs if s.field == "prompt"],
+                         ["Poet", "Poet 2"])
+        first = resolve_input_key(wf.inputs, "Poet", wf.graph)
+        self.assertEqual((first.node_id, first.field), ("n1", "prompt"))
+        second = resolve_input_key(wf.inputs, "Poet 2", wf.graph)
+        self.assertEqual((second.node_id, second.field), ("n2", "prompt"))
 
     def test_bare_scalar_refused_with_multiple_required(self):
         wf = Workflow.load(fixture("llm-vision.json"), api_key="k")
@@ -206,6 +215,26 @@ class SettingsTest(unittest.TestCase):
         with self.assertRaises(NanoodleError) as ctx:
             resolve_setting_key(wf.settings, "model", wf.graph)   # n2.model and n3.model
         self.assertIn("ambiguous", str(ctx.exception))
+
+    def test_setting_dot_form_matches_custom_name_and_title(self):
+        # cross-language parity: "CustomName.field" / "Title.field" resolve like
+        # "nodeId.field" (SPEC-io: settings resolve the same way as inputs)
+        wf = Workflow.from_dict({"nodes": [
+            {"id": "n1", "type": "llm", "fields": {"model": "a"}, "name": "Writer"},
+            {"id": "n2", "type": "tts", "fields": {"model": "b", "prompt": "p"}}]},
+            api_key="k")
+        spec = resolve_setting_key(wf.settings, "Writer.model", wf.graph)
+        self.assertEqual((spec.node_id, spec.field), ("n1", "model"))
+        spec2 = resolve_setting_key(wf.settings, "speech.voice", wf.graph)   # type title
+        self.assertEqual((spec2.node_id, spec2.field), ("n2", "voice"))
+
+    def test_image_size_options_match_the_app(self):
+        # ground truth play.html SIZES — no invented values, 'auto' included
+        wf = Workflow.from_dict({"nodes": [
+            {"id": "n1", "type": "image", "fields": {"model": "m", "prompt": "p"}}]},
+            api_key="k")
+        size = next(s for s in wf.settings if s.field == "size")
+        self.assertEqual(size.options, ["1024x1024", "1024x1536", "1536x1024", "auto"])
 
     def test_custom_civitai_air_setting_surfaces(self):
         wf = Workflow.from_dict({"nodes": [

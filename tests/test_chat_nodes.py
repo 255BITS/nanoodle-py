@@ -1,6 +1,7 @@
 """Chat-endpoint nodes: llm / vision / draw — exact payloads per SPEC-engine
 plus response parsing (content parts, message.images, reasoning)."""
 
+import base64
 import unittest
 
 from tests._util import FAST, MockedTest  # noqa: F401
@@ -17,10 +18,13 @@ class LlmPayloadTest(MockedTest):
         req = self.mock.requests_to("/api/v1/chat/completions")[0]
         self.assertEqual(req.json, {
             "model": "gpt-5o",
-            "messages": [{"role": "user", "content": [
-                {"type": "text", "text": "What is in this picture?"},
-                {"type": "image_url", "image_url": {"url": "data:image/png;base64,iVBORw0KGgo="}},
-            ]}],
+            "messages": [
+                # empty system field -> the spec default backfills (JS parity)
+                {"role": "system", "content": "You are a helpful, concise assistant."},
+                {"role": "user", "content": [
+                    {"type": "text", "text": "What is in this picture?"},
+                    {"type": "image_url", "image_url": {"url": "data:image/png;base64,iVBORw0KGgo="}},
+                ]}],
             "temperature": 0.8,
         })
         self.assertNotIn("stream", req.json)   # NON-streaming engine
@@ -40,7 +44,9 @@ class LlmPayloadTest(MockedTest):
         req = self.mock.requests_to("/api/v1/chat/completions")[0]
         self.assertEqual(req.json, {
             "model": "m",
-            "messages": [{"role": "user", "content": "p"}],
+            "messages": [
+                {"role": "system", "content": "You are a helpful, concise assistant."},
+                {"role": "user", "content": "p"}],
             "temperature": 0.2,
             "max_tokens": 60,
             "response_format": {"type": "json_object"},
@@ -88,7 +94,7 @@ class LlmPayloadTest(MockedTest):
             {"id": "l2", "from": {"node": "n1", "port": "image"}, "to": {"node": "n3", "port": "img1"}},
         ]})
         wf.run()
-        content = self.mock.requests_to("/api/v1/chat/completions")[0].json["messages"][0]["content"]
+        content = self.mock.requests_to("/api/v1/chat/completions")[0].json["messages"][-1]["content"]
         self.assertEqual([p["image_url"]["url"] for p in content if p["type"] == "image_url"],
                          ["data:image/png;base64,ONE", "data:image/png;base64,TWO"])
 
@@ -101,7 +107,7 @@ class LlmPayloadTest(MockedTest):
         ], "links": [{"id": "l1", "from": {"node": "n1", "port": "audio"},
                       "to": {"node": "n2", "port": "audio"}}]})
         wf.run()
-        content = self.mock.requests_to("/api/v1/chat/completions")[0].json["messages"][0]["content"]
+        content = self.mock.requests_to("/api/v1/chat/completions")[0].json["messages"][-1]["content"]
         self.assertEqual(content[0], {"type": "text", "text": "what is this?"})
         self.assertEqual(content[1], {"type": "input_audio",
                                       "input_audio": {"data": "UklGRgAAAABXQVZF",
@@ -115,7 +121,7 @@ class LlmPayloadTest(MockedTest):
         ], "links": [{"id": "l1", "from": {"node": "n1", "port": "audio"},
                       "to": {"node": "n2", "port": "audio"}}]})
         wf.run()
-        content = self.mock.requests_to("/api/v1/chat/completions")[0].json["messages"][0]["content"]
+        content = self.mock.requests_to("/api/v1/chat/completions")[0].json["messages"][-1]["content"]
         self.assertEqual(content[1]["input_audio"]["format"], "mp3")
 
     def test_llm_empty_wired_prompt_is_no_prompt_error(self):
@@ -138,6 +144,83 @@ class LlmPayloadTest(MockedTest):
             wf.run()
         self.assertIn("pick a model first", str(ctx.exception))
         self.assertEqual(self.mock.requests, [])
+
+
+class LlmHostedAudioTest(MockedTest):
+    """Cross-language parity (critical): an llm audio port fed by a music/tts
+    node that returned a hosted https URL must download + inline the clip —
+    SPEC-engine mandates input_audio.data = base64 bytes, never a URL."""
+
+    WAV = b"RIFF\x24\x00\x00\x00WAVEfmt trailing-bytes"
+
+    def _run(self, media_response):
+        self.mock.script("POST", "/api/v1/audio/speech",
+                         {"status": 200, "json": {"url": self.mock.base_url + "/media/song.wav"}})
+        self.mock.script("GET", "/media/song.wav", media_response)
+        self.mock.script("POST", "/api/v1/chat/completions", chat_response("heard it"))
+        wf = self.wf_dict({"nodes": [
+            {"id": "n1", "type": "tts", "fields": {"model": "m", "prompt": "sing"}},
+            {"id": "n2", "type": "llm", "fields": {"model": "m", "prompt": "what is this?"}},
+        ], "links": [{"id": "l1", "from": {"node": "n1", "port": "audio"},
+                      "to": {"node": "n2", "port": "audio"}}]}, **FAST)
+        wf.run()
+        content = self.mock.requests_to("/api/v1/chat/completions")[0].json["messages"][-1]["content"]
+        return content[1]
+
+    def test_https_audio_is_downloaded_and_inlined_as_base64(self):
+        from tests.harness import binary_response
+        part = self._run(binary_response(self.WAV, mime="audio/wav"))
+        self.assertEqual(part["type"], "input_audio")
+        self.assertEqual(part["input_audio"]["format"], "wav")
+        self.assertEqual(part["input_audio"]["data"],
+                         base64.b64encode(self.WAV).decode("ascii"))
+        # the paid chat call must NEVER carry a raw URL as "base64 data"
+        self.assertNotIn("http", part["input_audio"]["data"])
+        # the CDN download carries no auth headers
+        media_req = self.mock.requests_to("/media/song.wav")[0]
+        self.assertNotIn("authorization", media_req.headers)
+        self.assertNotIn("x-api-key", media_req.headers)
+
+    def test_generic_content_type_falls_back_to_magic_byte_sniff(self):
+        from tests.harness import binary_response
+        part = self._run(binary_response(self.WAV, mime="application/octet-stream"))
+        self.assertEqual(part["input_audio"]["format"], "wav")   # sniffed RIFF/WAVE
+
+
+class LlmSystemDefaultTest(MockedTest):
+    """Cross-language parity: run() backfills optional-input spec defaults —
+    an llm with an empty system field sends the app's default system message."""
+
+    def _graph(self):
+        return {"nodes": [
+            {"id": "n1", "type": "llm", "fields": {"model": "m", "prompt": "p"}}]}
+
+    def test_absent_system_field_backfills_spec_default(self):
+        self.mock.script("POST", "/api/v1/chat/completions", chat_response("ok"))
+        wf = self.wf_dict(self._graph())
+        wf.run()
+        req = self.mock.requests_to("/api/v1/chat/completions")[0]
+        self.assertEqual(req.json["messages"][0],
+                         {"role": "system", "content": "You are a helpful, concise assistant."})
+
+    def test_explicit_empty_system_input_clears_the_default(self):
+        # an EXPLICIT empty value clears an optional input — no system message
+        self.mock.script("POST", "/api/v1/chat/completions", chat_response("ok"))
+        wf = self.wf_dict(self._graph())
+        wf.run({"System prompt": ""})
+        req = self.mock.requests_to("/api/v1/chat/completions")[0]
+        self.assertEqual(req.json["messages"], [{"role": "user", "content": "p"}])
+
+    def test_whole_number_temperature_serializes_as_int(self):
+        # parity nit: JS `+temperature` sends 1, not 1.0 — keep bodies byte-identical
+        self.mock.script("POST", "/api/v1/chat/completions", chat_response("ok"))
+        graph = self._graph()
+        graph["nodes"][0]["fields"]["temperature"] = "1"
+        wf = self.wf_dict(graph)
+        wf.run()
+        body = self.mock.requests_to("/api/v1/chat/completions")[0].body.decode("utf-8")
+        self.assertIn('"temperature": 1', body)
+        self.assertNotIn('"temperature": 1.0', body)
 
 
 class LlmParseTest(MockedTest):

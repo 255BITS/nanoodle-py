@@ -186,7 +186,7 @@ class PartialResultTest(MockedTest):
         result = ctx.exception.result
         self.assertEqual(result.nodes["n2"].status, "done")     # llm succeeded
         self.assertEqual(result.nodes["n2"].out["text"], "prompt text")
-        self.assertEqual(result.nodes["n3"].status, "failed")
+        self.assertEqual(result.nodes["n3"].status, "error")
         self.assertEqual(len(result.errors), 1)
         self.assertEqual(result.errors[0]["node_id"], "n3")
         self.assertEqual(result.errors[0]["name"], "Image")
@@ -198,7 +198,7 @@ class PartialResultTest(MockedTest):
         with self.assertRaises(RunError) as ctx:
             wf.run({"Text": "x"})
         result = ctx.exception.result
-        self.assertEqual(result.nodes["n3"].status, "failed")
+        self.assertEqual(result.nodes["n3"].status, "error")
         self.assertEqual(result.nodes["n3"].error, "upstream failed: LLM")
         # the image endpoint was never called
         self.assertEqual(self.mock.requests_to("/v1/images/generations"), [])
@@ -214,7 +214,7 @@ class PartialResultTest(MockedTest):
             wf.run()
         result = ctx.exception.result
         statuses = sorted(result.nodes[n].status for n in ("n2", "n3"))
-        self.assertEqual(statuses, ["done", "failed"])
+        self.assertEqual(statuses, ["done", "error"])
         done = "n2" if result.nodes["n2"].status == "done" else "n3"
         self.assertEqual(result.nodes[done].out["text"], "fine")
         self.assertEqual(len(result.errors), 1)
