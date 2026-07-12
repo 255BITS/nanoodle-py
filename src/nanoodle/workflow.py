@@ -16,6 +16,7 @@ from .iodef import (derive_inputs, derive_outputs, derive_settings,
 from .media import MEDIA_INLINE_MAX, MediaRef, make_data_url
 from .share import decode_share_url, is_share_ref
 from .transport import default_http, resolve_api_key
+from .x402 import assert_payment_option
 
 _UNSUPPORTED_MSG = ("node type '%s' does local media processing that requires the "
                     "nanoodle browser app; not supported by this library yet")
@@ -81,9 +82,13 @@ class Workflow(object):
     """
 
     def __init__(self, data, api_key=None, base_url="https://nano-gpt.com",
-                 http=None, poll_intervals=None, timeouts=None):
+                 http=None, poll_intervals=None, timeouts=None, payment=None):
         self.warnings = []
         self.graph = materialize(data, self.warnings)
+        # accountless x402: a callback that sends the Nano invoice (never a seed).
+        # api_key="" stays explicitly keyless — only None falls back to the env var.
+        assert_payment_option(payment)
+        self._payment = payment
         self._api_key = resolve_api_key(api_key)
         self.base_url = base_url
         self.http = http or default_http
@@ -205,9 +210,10 @@ class Workflow(object):
                     (_UNSUPPORTED_MSG % node.type) + " (node %s '%s')" % (node.id, display_name(node)))
             if tspec.get("network"):
                 has_network = True
-        if has_network and not self._api_key:
-            raise NanoodleError("no API key — pass api_key= or set the NANOGPT_API_KEY "
-                                "environment variable (this workflow calls NanoGPT)")
+        if has_network and not self._api_key and self._payment is None:
+            raise NanoodleError("no API key — pass api_key=, set the NANOGPT_API_KEY "
+                                "environment variable, or pass payment= for accountless "
+                                "x402 runs (this workflow calls NanoGPT)")
 
         order = topo_order(graph)  # raises on cycles, naming the cyclic nodes
         return self._execute(graph, order, timeout, on_progress)
@@ -217,7 +223,7 @@ class Workflow(object):
     def _make_engine(self, on_progress):
         return Engine(self._api_key, self.base_url, self.http,
                       poll_intervals=self.poll_intervals, timeouts=self.timeouts,
-                      on_progress=on_progress)
+                      on_progress=on_progress, payment=self._payment)
 
     def _copy_graph(self):
         g = materialize({"nodes": [], "links": []})

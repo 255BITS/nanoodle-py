@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "nanoodle"
-version = "0.1.3"
+version = "0.2.0"
 description = "Run nanoodle visual AI workflows from Python — zero-dependency executor for saved noodle-graph.json files"
 readme = "README.md"
 license = { text = "MIT" }

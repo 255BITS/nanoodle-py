@@ -14,7 +14,8 @@ from .errors import NanoodleError
 from .graph import EDIT_IMG_RE, IMG_PORT_RE, REF_PORT_RE, display_name
 from .media import (MEDIA_INLINE_MAX, TRANSCRIBE_MAX_BYTES, MediaRef,
                     b64_image_mime, make_data_url, parse_data_url)
-from .transport import encode_multipart
+from .transport import HttpResponse, encode_multipart
+from .x402 import assert_payment_option, looks_like_result, parse_json, parse_nano_invoice
 
 IMG_ENDPOINT = "/v1/images/generations"          # note: NOT /api/v1
 CHAT_ENDPOINT = "/api/v1/chat/completions"
@@ -45,14 +46,17 @@ class NodeCancelled(NanoodleError):
 
 class Engine(object):
     def __init__(self, api_key, base_url, http, poll_intervals=None, timeouts=None,
-                 on_progress=None):
+                 on_progress=None, payment=None):
         self._api_key = api_key
+        assert_payment_option(payment)  # a callback or nothing — never a seed/private key
+        self._payment = payment
         self.base_url = (base_url or "https://nano-gpt.com").rstrip("/")
         self.http = http
         pi = poll_intervals or {}
         to = timeouts or {}
         self.poll_video = pi.get("video", 5.0)
         self.poll_audio = pi.get("audio", 3.0)
+        self.poll_x402 = pi.get("x402", 3.0)
         self.timeout_video = to.get("video", 600.0)
         self.timeout_audio = to.get("audio", 300.0)
         self.http_timeout = to.get("http", 120.0)
@@ -61,10 +65,70 @@ class Engine(object):
     # ---- transport helpers -------------------------------------------------
 
     def _auth_headers(self):
-        # Every JSON call carries BOTH headers. The key must never be logged
-        # or echoed into error messages.
-        return {"Authorization": "Bearer " + (self._api_key or ""),
-                "x-api-key": self._api_key or ""}
+        # Every keyed JSON call carries BOTH headers. The key must never be
+        # logged or echoed into error messages. Keyless with a payment
+        # callback opts into accountless x402 invoices instead.
+        if self._api_key:
+            return {"Authorization": "Bearer " + self._api_key,
+                    "x-api-key": self._api_key}
+        if self._payment is not None:
+            return {"x-x402": "true"}
+        return {"Authorization": "Bearer ", "x-api-key": ""}
+
+    def _paid_send(self, method, url, headers, body):
+        """Send a request, settling HTTP 402 via x402 when running keyless with a
+        payment callback: parse the Nano invoice → callback sends XNO (its own
+        wallet/signer — this library never touches funds) → poll the complete
+        URL until the deposit is seen → return the replayed result, or re-send
+        the original request stamped with the settled payment id. Each API call
+        pays at most once; a second 402 after settling is an error, never a
+        second send."""
+        resp = self.http(method, url, headers=headers, body=body, timeout=self.http_timeout)
+        if resp.status != 402 or self._payment is None or self._api_key:
+            return resp
+        settled = self._settle_402(resp)
+        if settled.get("response") is not None:
+            return settled["response"]  # complete replayed the stored request
+        retry_headers = dict(headers)
+        retry_headers["x-x402-payment-id"] = settled["paymentId"]
+        resp2 = self.http(method, url, headers=retry_headers, body=body, timeout=self.http_timeout)
+        if resp2.status == 402:
+            raise NanoodleError(
+                "payment %s settled, but the API still answered 402 on retry — check %s "
+                "before paying again" % (settled["paymentId"], settled.get("statusUrl") or "the payment status"))
+        return resp2
+
+    def _settle_402(self, resp):
+        body = parse_json(resp.text())
+        invoice = parse_nano_invoice(body, self.base_url) if body else None
+        if not invoice or not invoice.get("paymentId") or not invoice.get("completeUrl"):
+            raise NanoodleError(
+                "payment required, but the 402 response offered no usable Nano option"
+                + (" — " + resp.text()[:200] if body else ""))
+        self._payment(invoice)  # ← the callback does the actual XNO send
+        # The complete endpoint doubles as the poll: 402 = not seen on-chain yet.
+        deadline = (invoice["expiresAt"] / 1000.0) if invoice.get("expiresAt") else time.time() + 15 * 60
+        while True:
+            cr = self.http("POST", invoice["completeUrl"],
+                           headers={"Content-Type": "application/json", "x-x402": "true"},
+                           body="{}", timeout=self.http_timeout)
+            if 200 <= cr.status < 300:
+                cj = parse_json(cr.text()) if "json" in (cr.header("content-type") or "") else None
+                if looks_like_result(cj):
+                    # re-wrap so call sites keep their HttpResponse contract
+                    replay = HttpResponse(200, cr.headers, json.dumps(cj).encode("utf-8"))
+                    return {"paymentId": invoice["paymentId"], "statusUrl": invoice.get("statusUrl"),
+                            "response": replay}
+                return {"paymentId": invoice["paymentId"], "statusUrl": invoice.get("statusUrl")}
+            if cr.status != 402:
+                self._raise_http(cr)
+            if time.time() >= deadline:
+                raise NanoodleError(
+                    "payment window expired before the Nano deposit was detected (payment %s, %s to %s) "
+                    "— if you already sent it, check %s"
+                    % (invoice["paymentId"], invoice.get("amount") or invoice.get("amountRaw"),
+                       invoice.get("payTo"), invoice.get("explorerUrl") or invoice.get("statusUrl")))
+            time.sleep(self.poll_x402)
 
     def _raise_http(self, resp):
         body = resp.text()
@@ -84,8 +148,7 @@ class Engine(object):
                 "inline rather than uploading it; use smaller/shorter media")
         headers = self._auth_headers()
         headers["Content-Type"] = "application/json"
-        resp = self.http("POST", self.base_url + path, headers=headers, body=payload,
-                         timeout=self.http_timeout)
+        resp = self._paid_send("POST", self.base_url + path, headers, payload)
         if not (200 <= resp.status < 300):
             self._raise_http(resp)
         return resp
@@ -863,8 +926,7 @@ def _run_transcribe(engine, node, inp, on_cost):
     ctype, body = encode_multipart(fields, "file", "audio." + ext, data, mime)
     headers = engine._auth_headers()
     headers["Content-Type"] = ctype  # boundary set by our encoder; no other Content-Type
-    resp = engine.http("POST", engine.base_url + TRANSCRIBE_ENDPOINT, headers=headers,
-                       body=body, timeout=engine.http_timeout)
+    resp = engine._paid_send("POST", engine.base_url + TRANSCRIBE_ENDPOINT, headers, body)
     if not (200 <= resp.status < 300):
         engine._raise_http(resp)
     j = json.loads(resp.text())

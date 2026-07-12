@@ -115,8 +115,27 @@ def _save_outputs(result, keys, out_dir):
     return saved
 
 
+def _pay_printer(inv):
+    # accountless x402: print the Nano invoice on stderr and let the engine wait
+    # for the deposit. The send happens in the user's own wallet — never here.
+    print("", file=sys.stderr)
+    usd = " (~$%s)" % inv["amountUsd"] if inv.get("amountUsd") is not None else ""
+    print("⚡ payment required: %s%s" % (inv.get("amount") or inv.get("amountRaw") + " raw", usd), file=sys.stderr)
+    print("send with your Nano wallet:", file=sys.stderr)
+    print("  %s" % inv.get("payTo"), file=sys.stderr)
+    print("  %s" % inv.get("uri"), file=sys.stderr)
+    if inv.get("explorerUrl"):
+        print("  explorer: %s" % inv["explorerUrl"], file=sys.stderr)
+    print("waiting for the deposit… (Ctrl-C aborts)\n", file=sys.stderr)
+
+
 def cmd_run(args):
-    wf = Workflow.load(args.graph, api_key=args.api_key,
+    # --pay = accountless x402: the key is deliberately dropped (api_key="" stays
+    # explicitly keyless — None would fall back to $NANOGPT_API_KEY and charge an account).
+    pay = getattr(args, "pay", False)
+    wf = Workflow.load(args.graph,
+                       api_key="" if pay else args.api_key,
+                       payment=_pay_printer if pay else None,
                        base_url=args.base_url or "https://nano-gpt.com")
     inputs = _parse_kv(args.input, "input")
     settings = _parse_kv(args.set, "set") or None
@@ -186,6 +205,11 @@ def main(argv=None):
                        help="read NANOGPT_API_KEY (and other vars) from a .env-style file; "
                             "existing environment variables win")
     p_run.add_argument("--base-url", default=None)
+    p_run.add_argument("--pay", action="store_true",
+                       help="accountless run — no API key or account: each paid call prints a "
+                            "Nano (XNO) invoice (nano: URI + address) on stderr and waits for "
+                            "the deposit (x402; ignores any configured key; your own "
+                            "self-custody wallet does the send)")
     p_run.add_argument("--timeout", type=float, default=None, help="overall run timeout (seconds)")
     p_run.set_defaults(fn=cmd_run)
 

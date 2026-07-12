@@ -13,8 +13,9 @@ from .iodef import InputSpec, OutputSpec, SettingSpec
 from .media import MediaRef, media_from_file
 from .share import decode_share_fragment, decode_share_url, is_share_ref
 from .workflow import NodeRun, RunResult, Workflow
+from .x402 import parse_nano_invoice
 
-__version__ = "0.1.3"
+__version__ = "0.2.0"
 
 __all__ = [
     "Workflow", "RunResult", "NodeRun",
@@ -22,5 +23,6 @@ __all__ = [
     "NanoodleError", "UnsupportedNodeError", "RunError",
     "InputSpec", "OutputSpec", "SettingSpec",
     "decode_share_url", "decode_share_fragment", "is_share_ref",
+    "parse_nano_invoice",
     "__version__",
 ]

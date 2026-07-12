@@ -1,0 +1,223 @@
+{
+  "error": {
+    "message": "Insufficient balance. Multiple payment options available. Payment required: $0.0001 USD (0.00018392 XNO). For Lightning L402: pay the invoice and retry this endpoint with Authorization: L402 <token>:<preimage>. For x402 clients: retry this endpoint with X-PAYMENT header. For manual payments: send to nano_3ninmijhojotpxymdkhunrw65ggq6djtydjktxzed88rapzpg5bc7jderub1 then call /api/x402/complete/pay_66304af72ff034ab673234150b5997ec",
+    "type": "insufficient_quota",
+    "code": "insufficient_quota"
+  },
+  "payment": {
+    "version": 1,
+    "paymentId": "pay_66304af72ff034ab673234150b5997ec",
+    "requestHash": "sha256:6e018d847c60cf33b7c7a88412a0412d1acfa95bb09b8e40e477f89ba1b0e380",
+    "expiresAt": "2026-07-12T03:38:38.000Z",
+    "amountUsd": "0.0000605",
+    "statusUrl": "https://nano-gpt.com/api/x402/status/pay_66304af72ff034ab673234150b5997ec",
+    "completeUrl": "https://nano-gpt.com/api/x402/complete/pay_66304af72ff034ab673234150b5997ec",
+    "accepted": [
+      {
+        "scheme": "nano",
+        "protocolScheme": "nano",
+        "network": "nano-mainnet",
+        "amount": "183920000000000000000000000",
+        "amountFormatted": "0.00018392 XNO",
+        "amountUsd": "0.0000605",
+        "payTo": "nano_3ninmijhojotpxymdkhunrw65ggq6djtydjktxzed88rapzpg5bc7jderub1",
+        "paymentId": "pay_66304af72ff034ab673234150b5997ec",
+        "expiresAt": "2026-07-12T03:38:38.000Z",
+        "statusUrl": "https://nano-gpt.com/api/x402/status/pay_66304af72ff034ab673234150b5997ec",
+        "completeUrl": "https://nano-gpt.com/api/x402/complete/pay_66304af72ff034ab673234150b5997ec"
+      },
+      {
+        "scheme": "nano-exact",
+        "protocolScheme": "exact",
+        "network": "nano:mainnet",
+        "amount": "183920000000000000000000000",
+        "amountFormatted": "0.00018392 XNO",
+        "amountUsd": "0.0000605",
+        "payTo": "nano_3njeurfzgpwpnqjxoytfnqa7ezbgkordga8e8jg74ey77kww5d5emjjyzrhp",
+        "asset": "XNO",
+        "paymentId": "pay_56b03179d6cdf9f6295d07d7d25f88f5",
+        "expiresAt": "2026-07-12T03:38:38.000Z",
+        "statusUrl": "https://nano-gpt.com/api/x402/status/pay_56b03179d6cdf9f6295d07d7d25f88f5"
+      },
+      {
+        "scheme": "x402-exact",
+        "protocolScheme": "exact",
+        "network": "base",
+        "amount": "1000",
+        "amountFormatted": "0.001 USDC",
+        "amountUsd": "0.0000605",
+        "payTo": "0x4F180B7752993b785BE84EbBb15cE99c97A926A1",
+        "paymentId": "pay_0674b0b6b761cdfb01d7efa6fb3c257c",
+        "expiresAt": "2026-07-12T03:38:38.000Z"
+      },
+      {
+        "scheme": "base-usdc",
+        "protocolScheme": "usdc-base",
+        "network": "base",
+        "amount": "61",
+        "amountFormatted": "0.000061 USDC",
+        "amountUsd": "0.0000605",
+        "payTo": "0xe38a65f69FD32A1E876cB9AC16C049c54f399DA9",
+        "paymentId": "pay_e37372caf245b9b370df0ed24ae6215e",
+        "expiresAt": "2026-07-12T03:38:38.000Z",
+        "statusUrl": "https://nano-gpt.com/api/x402/status/pay_e37372caf245b9b370df0ed24ae6215e",
+        "completeUrl": "https://nano-gpt.com/api/x402/complete/pay_e37372caf245b9b370df0ed24ae6215e"
+      },
+      {
+        "scheme": "x402-solana-usdc",
+        "protocolScheme": "exact",
+        "network": "solana",
+        "amount": "61",
+        "amountFormatted": "0.000061 USDC",
+        "amountUsd": "0.0000605",
+        "payTo": "P16imsNyUZfMGDJTDV623AVgAPz4Zp2oBgZ9F8EbHe4",
+        "asset": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+        "feePayer": "BFK9TLC3edb13K6v4YyH3DwPb5DSUpkWvb7XnqCL9b4F",
+        "paymentId": "pay_15e59757d92b03511b4b68c4733fa5fa",
+        "expiresAt": "2026-07-12T03:38:38.000Z"
+      },
+      {
+        "scheme": "lightning-l402",
+        "protocolScheme": "lightning-l402",
+        "network": "bitcoin-lightning",
+        "amount": "1",
+        "amountFormatted": "1 sats",
+        "amountUsd": "0.00005445",
+        "payTo": "lnbc10n1p49xz9upp5duzc9q2nt9ntc9r7l38yaef2kz9g0670a4kw57x9uv3ga6ety8xqdpd2p6hycmgv9ek2gr0vcsyuctwduk5w5z5yp3hyetyd968xcqzzsxqzuysp5pqy8xh3ktuze42dw7g599940sfpppvnudta233ctxynn0g9n8wns9qxpqysgqpmwwjw384ea43de5xd5teq0vuk3ndmnqhs7lqa38uyarfmzqmtppyql8el8qqjsg8vacy4ultyhh5wggj0s24qx63hav5mws3nhuxgsqvvhlz0",
+        "paymentId": "pay_518a4f63c4266cdd3044e0a01d73d10f",
+        "expiresAt": "2026-07-12T03:38:40.000Z",
+        "invoice": "lnbc10n1p49xz9upp5duzc9q2nt9ntc9r7l38yaef2kz9g0670a4kw57x9uv3ga6ety8xqdpd2p6hycmgv9ek2gr0vcsyuctwduk5w5z5yp3hyetyd968xcqzzsxqzuysp5pqy8xh3ktuze42dw7g599940sfpppvnudta233ctxynn0g9n8wns9qxpqysgqpmwwjw384ea43de5xd5teq0vuk3ndmnqhs7lqa38uyarfmzqmtppyql8el8qqjsg8vacy4ultyhh5wggj0s24qx63hav5mws3nhuxgsqvvhlz0",
+        "paymentHash": "6f058281535966bc147efc4e4ee52ab08a87ebcfed6cea78c5e3228eeb2b21cc",
+        "l402Token": "eyJ2IjoxLCJzY2hlbWUiOiJsaWdodG5pbmctbDQwMiIsInBheW1lbnRJZCI6InBheV81MThhNGY2M2M0MjY2Y2RkMzA0NGUwYTAxZDczZDEwZiIsInJlcXVlc3RIYXNoIjoiNmUwMThkODQ3YzYwY2YzM2I3YzdhODg0MTJhMDQxMmQxYWNmYTk1YmIwOWI4ZTQwZTQ3N2Y4OWJhMWIwZTM4MCIsImV4cGlyZXNBdCI6MTc4MzgyNzUyMH0.6LBOwJ2maTuTZp7ZkjvZDmWMRe5sWCXVS-aZt4kd9a8",
+        "discountRate": 0.1,
+        "undiscountedAmountUsd": "0.0000605"
+      }
+    ]
+  },
+  "x402Version": 1,
+  "accepts": [
+    {
+      "scheme": "nano",
+      "network": "nano-mainnet",
+      "maxAmountRequired": "183920000000000000000000000",
+      "maxAmountRequiredFormatted": "0.00018392 XNO",
+      "maxAmountRequiredUSD": 0.00006050000000000001,
+      "resource": "/api/v1/chat/completions",
+      "description": "Payment required - $0.0001 USD",
+      "payTo": "nano_3ninmijhojotpxymdkhunrw65ggq6djtydjktxzed88rapzpg5bc7jderub1",
+      "paymentId": "pay_66304af72ff034ab673234150b5997ec",
+      "expiresAt": 1783827518,
+      "callbackUrl": "/api/x402/status/pay_66304af72ff034ab673234150b5997ec",
+      "completeUrl": "/api/x402/complete/pay_66304af72ff034ab673234150b5997ec",
+      "extra": {
+        "explorerUrl": "https://nanolooker.com/account/nano_3ninmijhojotpxymdkhunrw65ggq6djtydjktxzed88rapzpg5bc7jderub1"
+      }
+    },
+    {
+      "scheme": "exact",
+      "network": "nano:mainnet",
+      "asset": "XNO",
+      "maxAmountRequired": "183920000000000000000000000",
+      "maxAmountRequiredFormatted": "0.00018392 XNO",
+      "maxAmountRequiredUSD": 0.00006050000000000001,
+      "resource": "/api/v1/chat/completions",
+      "description": "Payment required - $0.0001 USD",
+      "mimeType": "application/json",
+      "payTo": "nano_3njeurfzgpwpnqjxoytfnqa7ezbgkordga8e8jg74ey77kww5d5emjjyzrhp",
+      "paymentId": "pay_56b03179d6cdf9f6295d07d7d25f88f5",
+      "expiresAt": 1783827518,
+      "callbackUrl": "/api/x402/status/pay_56b03179d6cdf9f6295d07d7d25f88f5",
+      "extra": {
+        "paymentId": "pay_56b03179d6cdf9f6295d07d7d25f88f5",
+        "explorerUrl": "https://nanolooker.com/account/nano_3njeurfzgpwpnqjxoytfnqa7ezbgkordga8e8jg74ey77kww5d5emjjyzrhp"
+      }
+    },
+    {
+      "scheme": "exact",
+      "network": "base",
+      "maxAmountRequired": "1000",
+      "maxAmountRequiredFormatted": "0.001 USDC",
+      "maxAmountRequiredUSD": 0.00006050000000000001,
+      "resource": "/api/v1/chat/completions",
+      "description": "Payment required - $0.0001 USD",
+      "payTo": "0x4F180B7752993b785BE84EbBb15cE99c97A926A1",
+      "paymentId": "pay_0674b0b6b761cdfb01d7efa6fb3c257c",
+      "expiresAt": 1783827518,
+      "callbackUrl": "/api/x402/status/pay_0674b0b6b761cdfb01d7efa6fb3c257c",
+      "extra": {
+        "name": "USD Coin",
+        "version": "2",
+        "chainId": 8453,
+        "tokenAddress": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+        "tokenSymbol": "USDC",
+        "tokenDecimals": 6
+      }
+    },
+    {
+      "scheme": "usdc-base",
+      "network": "base",
+      "maxAmountRequired": "61",
+      "maxAmountRequiredFormatted": "0.000061 USDC",
+      "maxAmountRequiredUSD": 0.00006050000000000001,
+      "resource": "/api/v1/chat/completions",
+      "description": "Payment required - $0.0001 USD (send to unique address)",
+      "payTo": "0xe38a65f69FD32A1E876cB9AC16C049c54f399DA9",
+      "paymentId": "pay_e37372caf245b9b370df0ed24ae6215e",
+      "expiresAt": 1783827518,
+      "callbackUrl": "/api/x402/status/pay_e37372caf245b9b370df0ed24ae6215e",
+      "completeUrl": "/api/x402/complete/pay_e37372caf245b9b370df0ed24ae6215e",
+      "extra": {
+        "explorerUrl": "https://basescan.org/address/0xe38a65f69FD32A1E876cB9AC16C049c54f399DA9",
+        "chainId": 8453,
+        "tokenAddress": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+        "tokenSymbol": "USDC",
+        "tokenDecimals": 6,
+        "isEphemeralAddress": true
+      }
+    },
+    {
+      "scheme": "exact",
+      "network": "solana",
+      "asset": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+      "maxAmountRequired": "61",
+      "maxAmountRequiredFormatted": "0.000061 USDC",
+      "maxAmountRequiredUSD": 0.00006050000000000001,
+      "resource": "/api/v1/chat/completions",
+      "description": "Payment required - $0.0001 USD",
+      "mimeType": "application/json",
+      "payTo": "P16imsNyUZfMGDJTDV623AVgAPz4Zp2oBgZ9F8EbHe4",
+      "paymentId": "pay_15e59757d92b03511b4b68c4733fa5fa",
+      "expiresAt": 1783827518,
+      "callbackUrl": "/api/x402/status/pay_15e59757d92b03511b4b68c4733fa5fa",
+      "extra": {
+        "feePayer": "BFK9TLC3edb13K6v4YyH3DwPb5DSUpkWvb7XnqCL9b4F",
+        "tokenAddress": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+        "tokenSymbol": "USDC",
+        "tokenDecimals": 6
+      }
+    },
+    {
+      "scheme": "lightning-l402",
+      "network": "bitcoin-lightning",
+      "maxAmountRequired": "1",
+      "maxAmountRequiredFormatted": "1 sats",
+      "maxAmountRequiredUSD": 0.00005445000000000001,
+      "resource": "/api/v1/chat/completions",
+      "description": "Payment required - $0.0001 USD",
+      "mimeType": "application/json",
+      "payTo": "lnbc10n1p49xz9upp5duzc9q2nt9ntc9r7l38yaef2kz9g0670a4kw57x9uv3ga6ety8xqdpd2p6hycmgv9ek2gr0vcsyuctwduk5w5z5yp3hyetyd968xcqzzsxqzuysp5pqy8xh3ktuze42dw7g599940sfpppvnudta233ctxynn0g9n8wns9qxpqysgqpmwwjw384ea43de5xd5teq0vuk3ndmnqhs7lqa38uyarfmzqmtppyql8el8qqjsg8vacy4ultyhh5wggj0s24qx63hav5mws3nhuxgsqvvhlz0",
+      "paymentId": "pay_518a4f63c4266cdd3044e0a01d73d10f",
+      "expiresAt": 1783827520,
+      "callbackUrl": "/api/x402/status/pay_518a4f63c4266cdd3044e0a01d73d10f",
+      "extra": {
+        "invoice": "lnbc10n1p49xz9upp5duzc9q2nt9ntc9r7l38yaef2kz9g0670a4kw57x9uv3ga6ety8xqdpd2p6hycmgv9ek2gr0vcsyuctwduk5w5z5yp3hyetyd968xcqzzsxqzuysp5pqy8xh3ktuze42dw7g599940sfpppvnudta233ctxynn0g9n8wns9qxpqysgqpmwwjw384ea43de5xd5teq0vuk3ndmnqhs7lqa38uyarfmzqmtppyql8el8qqjsg8vacy4ultyhh5wggj0s24qx63hav5mws3nhuxgsqvvhlz0",
+        "paymentHash": "6f058281535966bc147efc4e4ee52ab08a87ebcfed6cea78c5e3228eeb2b21cc",
+        "l402Token": "eyJ2IjoxLCJzY2hlbWUiOiJsaWdodG5pbmctbDQwMiIsInBheW1lbnRJZCI6InBheV81MThhNGY2M2M0MjY2Y2RkMzA0NGUwYTAxZDczZDEwZiIsInJlcXVlc3RIYXNoIjoiNmUwMThkODQ3YzYwY2YzM2I3YzdhODg0MTJhMDQxMmQxYWNmYTk1YmIwOWI4ZTQwZTQ3N2Y4OWJhMWIwZTM4MCIsImV4cGlyZXNBdCI6MTc4MzgyNzUyMH0.6LBOwJ2maTuTZp7ZkjvZDmWMRe5sWCXVS-aZt4kd9a8",
+        "btcpayInvoiceId": "5Ay2DE8Lh8XE3Ze4Dphhf3",
+        "discountRate": 0.1,
+        "undiscountedAmountUSD": 0.00006050000000000001
+      }
+    }
+  ],
+  "requestHash": "6e018d847c60cf33b7c7a88412a0412d1acfa95bb09b8e40e477f89ba1b0e380"
+}

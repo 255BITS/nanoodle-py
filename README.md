@@ -166,6 +166,29 @@ reports the price on each response.
 A price of `0` means known-included (subscription), not unknown. No telemetry,
 no analytics; the API key is never logged.
 
+## No account at all: pay per run in Nano (x402)
+
+NanoGPT supports x402 accountless payments: call the API with no key, get an
+HTTP 402 invoice, settle it in Nano (XNO — instant, feeless), and the call
+completes. nanoodle wires that up end to end:
+
+```bash
+# each paid call prints a Nano invoice (nano: URI + address) on stderr and waits
+python -m nanoodle run "https://nanoodle.com/#g=..." --input Text="hello" --pay
+```
+
+```python
+wf = Workflow.load(url, payment=lambda inv:
+    my_wallet.send(inv["payTo"], inv["amountRaw"]))  # YOUR signer does the send
+```
+
+The library **never touches funds or keys**: ``payment`` must be a callable —
+passing a seed or private-key string raises. Do the send inside the callback
+with your own wallet/signer, or show ``inv["uri"]`` for a human to scan. Each
+API call pays at most once; graphs with several paid nodes produce one small
+invoice per node. The invoice dict is field-identical to nanoodle-js's, so
+payment callbacks port between the two libraries unchanged.
+
 ## Testing
 
 Tests run fully offline against a mock NanoGPT server (`tests/harness/`):
