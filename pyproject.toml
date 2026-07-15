@@ -40,6 +40,8 @@ dependencies = []
 [project.urls]
 Homepage = "https://nanoodle.com"
 Repository = "https://github.com/nanoodlecom/nanoodle-py"
+Documentation = "https://github.com/nanoodlecom/nanoodle-py#readme"
+Issues = "https://github.com/nanoodlecom/nanoodle-py/issues"
 
 [project.scripts]
 nanoodle-py = "nanoodle.__main__:main"
