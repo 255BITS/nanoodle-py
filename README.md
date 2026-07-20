@@ -67,6 +67,11 @@ by reading redirect headers; no credentials are ever sent). Direct fragment
 links decode **fully offline** — zero network I/O, stdlib only. Paste one
 straight from a README, a chat, or a tweet.
 
+Links mangled in transit (a character flipped or dropped by a chat app or a
+copy/paste) are recovered best-effort: the graph's nodes and wires are salvaged
+and a warning is surfaced on `wf.warnings`. Only damage inside the graph itself
+makes a link unrecoverable.
+
 ### Discover a workflow’s interface
 
 ```python

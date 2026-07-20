@@ -71,13 +71,142 @@ def _gunzip_text(buf, what):
             "share link: %s payload is not valid gzip data — the link may be truncated" % what)
 
 
+# ---- best-effort salvage for damaged links ----------------------------------
+# Links get mangled in transit all the time — chat apps, line wraps, and manual
+# copy/paste flip or drop a character, which breaks the gzip CRC (and often a
+# few JSON characters) while leaving most of the payload intact. Executors only
+# need `nodes` and `links`, so when strict decoding fails we lax-decompress
+# (trailer ignored, partial output kept) and pull those two arrays out of the
+# damaged text. Cosmetic editor state (view, nid/lid) is sacrificed; damage
+# inside the graph itself still fails with the original error. Results carry
+# ``"recovered": True`` so callers can warn. (Mirrors nanoodle-js share.mjs.)
+
+
+def _gzip_body_start(b):
+    """Offset of the deflate body inside a gzip member, or -1 when not gzip."""
+    if len(b) < 11 or b[0] != 0x1F or b[1] != 0x8B or b[2] != 8:
+        return -1
+    flg = b[3]
+    i = 10
+    if flg & 4:  # FEXTRA
+        if i + 2 > len(b):
+            return -1
+        i += 2 + (b[i] | (b[i + 1] << 8))
+    if flg & 8:  # FNAME
+        while i < len(b) and b[i] != 0:
+            i += 1
+        i += 1
+    if flg & 16:  # FCOMMENT
+        while i < len(b) and b[i] != 0:
+            i += 1
+        i += 1
+    if flg & 2:  # FHCRC
+        i += 2
+    return i if i < len(b) else -1
+
+
+def _gunzip_lax(buf):
+    """Best-effort gunzip: raw-inflate the body, ignore the CRC32/ISIZE
+    trailer, keep partial output on truncation. None when nothing
+    decompressible remains."""
+    start = _gzip_body_start(buf)
+    if start < 0:
+        return None
+    # The 8-byte trailer is junk to a raw-deflate decoder; drop it up front
+    # (mirrors the JS twin — on a truncated payload this trims real data, but
+    # the chunked loop below already keeps everything before the damage).
+    body = buf[start:max(start + 1, len(buf) - 8)]
+    d = zlib.decompressobj(-zlib.MAX_WBITS)
+    out = []
+    try:
+        for i in range(0, len(body), 1024):  # chunked so a late error keeps earlier output
+            out.append(d.decompress(body[i:i + 1024]))
+        out.append(d.flush())
+    except zlib.error:
+        pass
+    data = b"".join(out)
+    return data or None
+
+
+def _match_bracket(text, i):
+    """Index of the bracket closing text[i] (a "[" or "{"), string-aware; -1
+    when unbalanced."""
+    if i >= len(text) or text[i] not in "[{":
+        return -1
+    depth = 0
+    in_str = False
+    j = i
+    while j < len(text):
+        c = text[j]
+        if in_str:
+            if c == "\\":
+                j += 1
+            elif c == '"':
+                in_str = False
+        elif c == '"':
+            in_str = True
+        elif c in "[{":
+            depth += 1
+        elif c in "]}":
+            depth -= 1
+            if not depth:
+                return j
+        j += 1
+    return -1
+
+
+def _extract_json_value(text, key):
+    """Parse the value of ``"key": …`` out of possibly-damaged JSON text; None
+    when no occurrence parses."""
+    import json
+    needle = '"%s"' % key
+    frm = 0
+    while True:
+        at = text.find(needle, frm)
+        if at == -1:
+            return None
+        frm = at + 1
+        j = at + len(needle)
+        while j < len(text) and text[j].isspace():
+            j += 1
+        if j >= len(text) or text[j] != ":":
+            continue
+        j += 1
+        while j < len(text) and text[j].isspace():
+            j += 1
+        end = _match_bracket(text, j)
+        if end == -1:
+            continue
+        try:
+            return json.loads(text[j:end + 1])
+        except ValueError:
+            continue  # damaged here — try the next occurrence
+
+
+def _salvage_graph(text):
+    if not text:
+        return None
+    nodes = _extract_json_value(text, "nodes")
+    if not (isinstance(nodes, list) and nodes
+            and all(isinstance(n, dict) and isinstance(n.get("type"), str) for n in nodes)):
+        return None
+    links = _extract_json_value(text, "links")
+    return {"v": 1, "nodes": nodes, "links": links if isinstance(links, list) else []}
+
+
+def _lax_text(data):
+    return data.decode("utf-8", errors="replace") if data else None
+
+
 def decode_share_fragment(fragment):
     """Decode a share fragment ("#g=…", "g=…", "#a=…", …) to its graph.
 
     Returns a dict ``{"graph": dict, "kind": "g"|"j"|"a", "app": dict|None}``.
     ``app`` is present only for #a= links: ``{name?, lang?, has_files: bool}``
     (files/samples/lang are play.html presentation — executors run graphs, not
-    apps).
+    apps). A damaged link whose graph was salvaged best-effort additionally
+    carries ``"recovered": True`` (nodes + links only — cosmetic editor state
+    is dropped); warn the user and suggest re-copying the link.
     """
     f = str(fragment)
     if f.startswith("#"):
@@ -88,28 +217,67 @@ def decode_share_fragment(fragment):
             "format. Open the link in a browser and use 🔗 Share to mint a #g= workflow "
             "link instead.")
     if f.startswith("g="):
-        graph = _parse_json(_gunzip_text(_b64url_to_bytes(f[2:], "#g="), "#g="), "#g=")
-        return {"graph": graph, "kind": "g", "app": None}
+        buf = _b64url_to_bytes(f[2:], "#g=")
+        text = None
+        try:
+            text = _gunzip_text(buf, "#g=")
+            return {"graph": _parse_json(text, "#g="), "kind": "g", "app": None}
+        except NanoodleError as e:
+            strict_err = e
+        if text is None:
+            text = _lax_text(_gunzip_lax(buf))
+        graph = _salvage_graph(text)
+        if not graph:
+            raise strict_err
+        return {"graph": graph, "kind": "g", "app": None, "recovered": True}
     if f.startswith("j="):
-        graph = _parse_json(_b64url_to_bytes(f[2:], "#j=").decode("utf-8"), "#j=")
-        return {"graph": graph, "kind": "j", "app": None}
+        text = _b64url_to_bytes(f[2:], "#j=").decode("utf-8", errors="replace")
+        try:
+            return {"graph": _parse_json(text, "#j="), "kind": "j", "app": None}
+        except NanoodleError as e:
+            graph = _salvage_graph(text)
+            if not graph:
+                raise e
+            return {"graph": graph, "kind": "j", "app": None, "recovered": True}
     if f.startswith("a="):
         tag = f[2:]
+        strict_err = None
         if tag[:1] == "u":
-            json_text = _b64url_to_bytes(tag[1:], "#a=u").decode("utf-8")
+            json_text = _b64url_to_bytes(tag[1:], "#a=u").decode("utf-8", errors="replace")
         else:
-            json_text = _gunzip_text(_b64url_to_bytes(tag, "#a="), "#a=")
-        payload = _parse_json(json_text, "#a=")
-        if not isinstance(payload, dict) or not payload.get("graph"):
-            raise NanoodleError("share link: #a= app payload has no graph in it")
-        app = {"has_files": bool(payload.get("files"))}
-        name = payload.get("name")
-        if isinstance(name, str) and name:
-            app["name"] = name
-        lang = payload.get("lang")
-        if isinstance(lang, str) and lang:
-            app["lang"] = lang
-        return {"graph": payload["graph"], "kind": "a", "app": app}
+            buf = _b64url_to_bytes(tag, "#a=")
+            try:
+                json_text = _gunzip_text(buf, "#a=")
+            except NanoodleError as e:
+                strict_err = e
+                json_text = _lax_text(_gunzip_lax(buf))
+        if strict_err is None:
+            try:
+                payload = _parse_json(json_text, "#a=")
+            except NanoodleError as e:
+                strict_err = e
+                payload = None
+            if payload is not None:
+                if not isinstance(payload, dict) or not payload.get("graph"):
+                    raise NanoodleError("share link: #a= app payload has no graph in it")
+                app = {"has_files": bool(payload.get("files"))}
+                name = payload.get("name")
+                if isinstance(name, str) and name:
+                    app["name"] = name
+                lang = payload.get("lang")
+                if isinstance(lang, str) and lang:
+                    app["lang"] = lang
+                return {"graph": payload["graph"], "kind": "a", "app": app}
+        # salvage: the app payload nests its graph — prefer the intact "graph"
+        # object, else its nodes/links
+        nested = _extract_json_value(json_text, "graph") if json_text else None
+        if isinstance(nested, dict) and isinstance(nested.get("nodes"), list):
+            graph = nested
+        else:
+            graph = _salvage_graph(json_text)
+        if not graph:
+            raise strict_err
+        return {"graph": graph, "kind": "a", "app": {"has_files": False}, "recovered": True}
     raise NanoodleError(
         'share link: no #g=/#j=/#a= fragment found in "%s"' % fragment)
 

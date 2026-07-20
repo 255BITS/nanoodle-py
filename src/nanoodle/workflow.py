@@ -114,8 +114,14 @@ class Workflow(object):
                 share_opts["opener"] = opts.pop("opener")
             if "max_hops" in opts:
                 share_opts["max_hops"] = opts.pop("max_hops")
-            graph = decode_share_url(src, **share_opts)["graph"]
-            return cls(graph, **opts)
+            decoded = decode_share_url(src, **share_opts)
+            wf = cls(decoded["graph"], **opts)
+            if decoded.get("recovered"):
+                wf.warnings.insert(0, (
+                    "share link was damaged (usually a copy/paste artifact) — recovered the "
+                    "graph's nodes and wires best-effort; re-copy the link from the editor "
+                    "for a pristine version"))
+            return wf
         with open(src, "r", encoding="utf-8") as f:
             return cls(json.load(f), **opts)
 

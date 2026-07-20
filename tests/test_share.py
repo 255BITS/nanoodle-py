@@ -70,6 +70,75 @@ class WorkflowLoadTest(unittest.TestCase):
         self.assertGreater(len(wf.graph.nodes), 0)
 
 
+def _to_b64u(text):
+    return base64.urlsafe_b64encode(text.encode("utf-8")).decode("ascii").rstrip("=")
+
+
+def _corrupt_trailer(url):
+    # Corrupt a char 6 from the end: inside the 8-byte CRC32/ISIZE trailer, and
+    # far enough from the end that the change never lands in base64 padding bits.
+    i = len(url) - 6
+    return url[:i] + ("B" if url[i] == "A" else "A") + url[i + 1:]
+
+
+# Real-world regression: a #g= link mangled in a chat paste — one character
+# flipped inside the compressed stream, garbling the trailing view metadata and
+# the CRC. Strict decoding refused the whole link; salvage must recover all 3
+# nodes + 1 wire. (Same fixture as nanoodle-js.)
+MANGLED_REAL_LINK = "https://nanoodle.com/#g=H4sIAAAAAAAAA22RS47bMBBEr9LoNa2RxI8tXiBXSBBkwbF6bCIUKYgdf2Lo7gHpMTSLbLhoVlc9Fh94QdsJjGmkjPbnA_2IFo87H5kio0C-z1QmaZqegxvaQyvwjnZnWoEfnsKY0T6Q6cZo8RtFWhxTBgeZfQjgJ3ci-FjSBA7mJU0zC-AzRXDRT1XqGXzkVFbOaWG4-JESHIOfG1wFXtFK1a7iEy92G1hNrVTmSdX1_6NywD7eITsf3pNjSBEcnEK6-niCd5_Cn8lHykeKDJmcgOhPZxaQ2S0Z1y2636Lru17ZqtFKq67ttOl1BZGyMdJI3Ws5tHW4UWX_tzh0ba9u5UCBUxopoMWFLvTWN91bId9x2j1jVlGX6vazQ7Ttuv4SGHz8_eXvQimnlF2U5V9fhc1p4Vdhq0BOXwX9Jvh0r96xWKqSMaKVAi-erpXAxe9oldaNNNKovTLtIPdalIsfaOVwaPb9vt8Pxsj2oAelMB9dILTduv4DA-VefHUCAAA"
+
+
+class SalvageTest(unittest.TestCase):
+    """Damaged links: salvage nodes+links instead of failing outright."""
+
+    def test_corrupted_gzip_trailer_still_decodes_flagged_recovered(self):
+        g = golden("g-starter")
+        r = decode_share_url(_corrupt_trailer(g["url"]))
+        self.assertIs(r.get("recovered"), True)
+        self.assertEqual(r["graph"]["nodes"], g["graph"]["nodes"])
+        self.assertEqual(r["graph"]["links"], g["graph"]["links"])
+
+    def test_damage_in_cosmetic_keys_survivable_pristine_links_unflagged(self):
+        g = golden("g-starter")
+        self.assertNotIn("recovered", decode_share_url(g["url"]))
+        graph = dict(g["graph"], view={"panX": 1, "panY": 2})
+        # the kind of one-character mangling copy/paste produces
+        text = json.dumps(graph, separators=(",", ":")).replace('"view":{', '"view"{')
+        r = decode_share_fragment("#j=" + _to_b64u(text))
+        self.assertIs(r.get("recovered"), True)
+        self.assertEqual(r["graph"]["nodes"], g["graph"]["nodes"])
+        self.assertEqual(r["graph"]["links"], g["graph"]["links"])
+
+    def test_damage_inside_nodes_array_stays_hard_error(self):
+        text = json.dumps(golden("g-starter")["graph"], separators=(",", ":"))
+        text = text.replace('"nodes":[{"', '"nodes":[{', 1)
+        with self.assertRaises(NanoodleError):
+            decode_share_fragment("#j=" + _to_b64u(text))
+
+    def test_damaged_app_link_salvages_nested_graph(self):
+        a = next(g for g in GOLDENS
+                 if g["name"].startswith("a-") and "#a=u" not in g["url"])
+        r = decode_share_url(_corrupt_trailer(a["url"]))
+        self.assertIs(r.get("recovered"), True)
+        self.assertEqual(r["graph"]["nodes"], a["graph"]["nodes"])
+
+    def test_real_mangled_link_from_the_field_recovers(self):
+        r = decode_share_url(MANGLED_REAL_LINK)
+        self.assertIs(r.get("recovered"), True)
+        self.assertEqual(len(r["graph"]["nodes"]), 3)
+        self.assertEqual(len(r["graph"]["links"]), 1)
+        image = next(n for n in r["graph"]["nodes"] if n["type"] == "image")
+        self.assertEqual(image["fields"]["model"], "reve/2.1/text-to-image")
+
+    def test_unsalvageable_garbage_still_raises(self):
+        with self.assertRaises(NanoodleError):
+            decode_share_fragment("#g=H4sIAAAAAAAAAwXB")
+
+    def test_load_surfaces_recovery_warning(self):
+        wf = Workflow.load(MANGLED_REAL_LINK, api_key="unused")
+        self.assertTrue(any("damaged" in w for w in wf.warnings))
+
+
 class IsShareRefTest(unittest.TestCase):
     def test_urls_and_fragments_yes_file_paths_no(self):
         for ok in ("https://nanoodle.com/#g=abc", "http://localhost:8080/play.html#a=abc",
