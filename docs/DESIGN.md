@@ -1,8 +1,8 @@
 # nanoodle executor libraries — DESIGN (binding decisions)
 
 Two sibling repos, both MIT, both ZERO runtime dependencies:
-- /home/ntc/dev/nanoodle-js  — npm package `nanoodle` (ESM, Node >= 20, built-in fetch, node:test)
-- /home/ntc/dev/nanoodle-py  — PyPI package `nanoodle` (Python >= 3.9, stdlib urllib only, unittest)
+- /home/ntc/dev/nanoodlecom/nanoodle-js  — npm package `nanoodle` (ESM, Node >= 20, built-in fetch, node:test)
+- /home/ntc/dev/nanoodlecom/nanoodle-py  — PyPI package `nanoodle` (Python >= 3.9, stdlib urllib only, unittest)
 
 Read SPEC-format.md, SPEC-engine.md, SPEC-io.md in this directory first. They are the contract.
 

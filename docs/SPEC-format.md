@@ -1,6 +1,6 @@
 # Nanoodle Workflow JSON Format (the downloadable "save")
 
-Verified against /home/ntc/dev/nanoodle/index.html (editor). The 💾 Save button writes
+Verified against /home/ntc/dev/nanoodlecom/nanoodle/index.html (editor). The 💾 Save button writes
 `noodle-graph.json` = exactly `JSON.stringify(serializeGraph(), null, 2)` — no wrapper.
 
 ## Top-level shape
@@ -65,6 +65,6 @@ field-port overrides the typed field value at run time.
 Display name resolution (play.html `displayName`): `node.name` (trimmed, if set) → NODE_TYPES[type].title → type → "?".
 
 ## Canonical fixture
-/home/ntc/dev/nanoodle/noodle-graph.json — starter graph: text("a cozy ramen shop on a rainy night")
+/home/ntc/dev/nanoodlecom/nanoodle/noodle-graph.json — starter graph: text("a cozy ramen shop on a rainy night")
 → llm(model "zai-org/glm-5.2", system prompt-writer) → image(model "nano-banana-2-lite", size "1k", variations "1").
 Wire n1.text→n2.prompt, n2.text→n3.prompt.
