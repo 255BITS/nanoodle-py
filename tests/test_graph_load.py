@@ -73,6 +73,17 @@ class LoaderSemanticsTest(unittest.TestCase):
         self.assertIn("flurble", str(ctx.exception))
         self.assertEqual(ctx.exception.node_id, "n1")
 
+    def test_draw_node_now_fails_as_unknown_type(self):
+        # draw was removed (NanoGPT retired the chat-image contract) — a graph
+        # carrying one must warn on load and fail fast BEFORE any API spend.
+        wf = Workflow.from_dict({"nodes": [
+            {"id": "n1", "type": "draw", "fields": {"model": "m", "prompt": "p"}}]},
+            api_key="k")
+        self.assertTrue(any("draw" in w for w in wf.warnings))
+        with self.assertRaises(UnsupportedNodeError) as ctx:
+            wf.run()
+        self.assertEqual(ctx.exception.node_id, "n1")
+
     def test_node_without_id_skipped_with_warning(self):
         wf = Workflow.from_dict({"nodes": [
             {"type": "text", "fields": {"text": "lost"}},

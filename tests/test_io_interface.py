@@ -175,13 +175,6 @@ class OutputDerivationTest(unittest.TestCase):
         self.assertEqual([o.key for o in wf.outputs], ["Writer", "Writer 2"])
         self.assertEqual([o.node_id for o in wf.outputs], ["n3", "n4"])
 
-    def test_draw_exposes_both_ports_primary_first(self):
-        wf = Workflow.from_dict({"nodes": [
-            {"id": "n1", "type": "draw", "fields": {"model": "m", "prompt": "p"}}]},
-            api_key="k")
-        self.assertEqual(wf.outputs[0].ports, ["image", "text"])
-
-
 class SettingsTest(unittest.TestCase):
     def test_settings_derived_with_current_values(self):
         wf = Workflow.load(fixture("starter-graph.json"), api_key="k")

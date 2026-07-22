@@ -576,44 +576,6 @@ def _run_vision(engine, node, inp, on_cost):
     return {"text": _parse_chat_text(j)}
 
 
-def _run_draw(engine, node, inp, on_cost):
-    prompt = _prompt_of(node)
-    imgs = _collect_ports(inp, IMG_PORT_RE)
-    if sum(len(u) for u in imgs) > MEDIA_INLINE_MAX:
-        raise NanoodleError("reference images too large (~4 MB combined limit) — use fewer or smaller images")
-    messages = []
-    if _fstr(node, "system").strip():
-        messages.append({"role": "system", "content": _fstr(node, "system").strip()})
-    messages.append(_build_user_message(prompt, imgs))
-    resp = engine._post_json(CHAT_ENDPOINT, _chat_body(node, messages))
-    j = json.loads(resp.text())
-    # record the charge FIRST — a text-only reply still billed the call
-    on_cost(*engine._cost_with_headers(j, resp))
-    msg = ((j.get("choices") or [{}])[0] or {}).get("message") or {}
-    images = []
-    for im in (msg.get("images") or []):
-        if isinstance(im, dict):
-            u = (im.get("image_url") or {}).get("url") or im.get("url")
-        else:
-            u = im if isinstance(im, str) else None
-        if u:
-            images.append(u)
-    content = msg.get("content")
-    if isinstance(content, list):
-        text = "".join(p.get("text") or "" for p in content)
-    else:
-        text = content or ""
-    if not images:
-        raise NanoodleError(
-            "this model replied with text, not an image — pick an image-output model"
-            if text else "no image in response")
-    show = node.fields.get("showThinking") not in (False, "false")
-    if show and msg.get("reasoning"):
-        text = "```thinking\n%s\n```\n\n%s" % (msg["reasoning"], text)
-    refs = [engine._media_ref(u) for u in images]
-    return {"image": refs[_sel_index(node, len(refs))], "images": refs, "text": text}
-
-
 # ---- image family (/v1/images/generations) ---------------------------------
 
 def _gen_image(engine, node, on_cost, prompt, n=1, image_data_url=None, mask_data_url=None):
@@ -1142,7 +1104,6 @@ _EXECUTORS = {
     "image": _run_image,
     "edit": _run_edit,
     "inpaint": _run_inpaint,
-    "draw": _run_draw,
     "tvideo": _run_tvideo,
     "ivideo": _run_ivideo,
     "vedit": _run_vedit,

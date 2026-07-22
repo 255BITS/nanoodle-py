@@ -8,7 +8,6 @@ INPUT_SPECS table (only these node types contribute; kind in parens):
 - upload: image (image) · aupload: audio (audio) · vupload: video (video)
 - llm: prompt (textarea, required); system (textarea, OPTIONAL, def "You are a helpful, concise assistant.")
 - image: prompt · tvideo: prompt · music: prompt · remix: prompt · tts: prompt (all textarea, required)
-- draw: prompt (required); system (optional)
 - inpaint (special): prompt ("What to paint in"); image and/or mask when not wired
 - choice (special): field `selected`, kind choice, options from fields.options newline-split
 
@@ -33,7 +32,7 @@ node.fields[field] = value before execution. Same wired-hides rule (cannot overr
 
 ## Outputs — deriveOutputs (play.html 3208-3214)
 Output nodes = nodes with a non-empty outputs list AND no outgoing link (sinks). No explicit marker.
-Result value = node.out[NODE_TYPES[type].outputs[0].name] (primary port). draw also has secondary text; expose all ports.
+Result value = node.out[NODE_TYPES[type].outputs[0].name] (primary port). Some nodes expose several output ports (e.g. vframes frame1..frameK); expose all ports.
 Result keying: displayName(node) (custom name → type title); on duplicate display names, suffix " 2", " 3" in topo order; always ALSO keyed by node id.
 Intermediate nodes still run; expose them under result.nodes / result.steps for debugging.
 

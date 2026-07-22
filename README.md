@@ -137,7 +137,7 @@ nanoodle-py inspect "https://nanoodle.com/#g=..."                 # a share link
 |---|---|
 | local | text, upload (image/audio/video), choice, join, comment |
 | local media† | resize, vframes, combine, soundtrack, trim, extractaudio |
-| NanoGPT | llm (incl. vision + audio input), image, draw, edit, inpaint*, vision, tvideo, ivideo, vedit, lipsync, music, remix, tts, transcribe |
+| NanoGPT | llm (incl. vision + audio input), image, edit, inpaint*, vision, tvideo, ivideo, vedit, lipsync, music, remix, tts, transcribe |
 
 † **local media** needs **ffmpeg** on `PATH` (soft dependency — not a PyPI package). Same behaviour as the browser app; clear error if ffmpeg is missing.
 

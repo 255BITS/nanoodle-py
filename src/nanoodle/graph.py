@@ -10,7 +10,7 @@ import re
 from .errors import NanoodleError
 
 # Dynamic input-port families (SPEC-engine execution step 4).
-IMG_PORT_RE = re.compile(r"^img\d+$")        # llm / draw vision slots
+IMG_PORT_RE = re.compile(r"^img\d+$")        # llm vision slots
 EDIT_IMG_RE = re.compile(r"^image\d*$")      # edit multi-reference: image, image2, ...
 VID_PORT_RE = re.compile(r"^vid\d+$")        # combine clips
 CLIP_PORT_RE = re.compile(r"^clip\d+$")      # combine clips (spec alias)
@@ -50,8 +50,6 @@ NODE_TYPES = {
     "llm":        {"title": "LLM",              "outputs": [("text", "text")], "static": ["audio"],
                    "dynamic": [IMG_PORT_RE], "network": True},
     "image":      {"title": "Image",            "outputs": [("image", "image")], "network": True},
-    "draw":       {"title": "Draw",             "outputs": [("image", "image"), ("text", "text")],
-                   "dynamic": [IMG_PORT_RE], "network": True},
     "edit":       {"title": "Edit",             "outputs": [("image", "image")],
                    "dynamic": [EDIT_IMG_RE], "network": True},
     "inpaint":    {"title": "Inpaint",          "outputs": [("image", "image")],

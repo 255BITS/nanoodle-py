@@ -42,7 +42,6 @@ field-port overrides the typed field value at run time.
 | join | Join | a:text, b:text | — | text:text | sep (default " "; literal "\n" means newline) |
 | llm | LLM | — | img1..:image (vision), audio:audio | text:text | model, system, prompt, temperature, maxTokens, format(Text\|JSON), reasoningEffort, showThinking |
 | image | Image | — | — | image:image | model, prompt, size, variations, seed, customCivitaiAir |
-| draw | Draw | — | img1..:image | image:image, text:text | model, system, prompt, showThinking |
 | edit | Edit | — | image,image2..:image | image:image | model, prompt, size, seed |
 | inpaint | Inpaint | image:image, mask:image | — | image:image | model, prompt, size, seed, brush |
 | resize | Resize/crop | image:image | — | image:image | mode(fit\|fill\|exact), width, height (LOCAL) |

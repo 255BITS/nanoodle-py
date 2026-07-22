@@ -1,5 +1,5 @@
-"""Chat-endpoint nodes: llm / vision / draw — exact payloads per SPEC-engine
-plus response parsing (content parts, message.images, reasoning)."""
+"""Chat-endpoint nodes: llm / vision — exact payloads per SPEC-engine
+plus response parsing (content parts, reasoning)."""
 
 import base64
 import unittest
@@ -7,7 +7,7 @@ import unittest
 from tests._util import FAST, MockedTest  # noqa: F401
 from tests.harness import chat_response
 
-from nanoodle import MediaRef, NanoodleError, RunError, Workflow
+from nanoodle import RunError, Workflow
 
 
 class LlmPayloadTest(MockedTest):
@@ -312,96 +312,6 @@ class VisionTest(MockedTest):
         self.assertEqual(self.mock.requests, [])
 
 
-class DrawTest(MockedTest):
-    def test_payload_has_no_response_format(self):
-        img_url = "data:image/png;base64,DRAWN="
-        self.mock.script("POST", "/api/v1/chat/completions",
-                         chat_response("here you go",
-                                       images=[{"image_url": {"url": img_url}}]))
-        wf = self.wf_dict({"nodes": [
-            {"id": "n1", "type": "draw", "fields": {"model": "m", "prompt": "a boat"}}]})
-        result = wf.run()
-        req = self.mock.requests_to("/api/v1/chat/completions")[0]
-        self.assertEqual(req.json, {"model": "m",
-                                    "messages": [{"role": "user", "content": "a boat"}],
-                                    "temperature": 0.8})
-        self.assertEqual(result["Draw"].url, img_url)
-        self.assertEqual(result.nodes["n1"].out["text"], "here you go")
-
-    def test_wired_reference_images_ride_in_message(self):
-        self.mock.script("POST", "/api/v1/chat/completions",
-                         chat_response("done", images=[{"url": "data:image/png;base64,OUT"}]))
-        wf = self.wf_dict({"nodes": [
-            {"id": "n1", "type": "upload", "fields": {"image": "data:image/png;base64,REF"}},
-            {"id": "n2", "type": "draw", "fields": {"model": "m", "prompt": "redraw"}},
-        ], "links": [{"id": "l1", "from": {"node": "n1", "port": "image"},
-                      "to": {"node": "n2", "port": "img1"}}]})
-        wf.run()
-        content = self.mock.requests_to("/api/v1/chat/completions")[0].json["messages"][0]["content"]
-        self.assertEqual(content, [
-            {"type": "text", "text": "redraw"},
-            {"type": "image_url", "image_url": {"url": "data:image/png;base64,REF"}},
-        ])
-
-    def test_image_shape_variants_parsed(self):
-        # {image_url:{url}}, {url}, and a bare string all count
-        self.mock.script("POST", "/api/v1/chat/completions",
-                         chat_response("", images=[{"image_url": {"url": "u1"}},
-                                                   {"url": "u2"}, "u3"]))
-        wf = self.wf_dict({"nodes": [
-            {"id": "n1", "type": "draw", "fields": {"model": "m", "prompt": "p"}}]})
-        result = wf.run()
-        self.assertEqual([r.url for r in result.nodes["n1"].out["images"]], ["u1", "u2", "u3"])
-        self.assertIsInstance(result["Draw"], MediaRef)
-        self.assertEqual(result["Draw"].url, "u1")   # primary = first
-
-    def test_text_only_reply_is_actionable_error(self):
-        self.mock.script("POST", "/api/v1/chat/completions", chat_response("just words"))
-        wf = self.wf_dict({"nodes": [
-            {"id": "n1", "type": "draw", "fields": {"model": "m", "prompt": "p"}}]})
-        with self.assertRaises(RunError) as ctx:
-            wf.run()
-        self.assertIn("replied with text, not an image", str(ctx.exception))
-
-    def test_text_only_reply_still_records_the_charge(self):
-        # the call billed even though it failed the node — cost must survive (JS parity)
-        self.mock.script("POST", "/api/v1/chat/completions",
-                         chat_response("just words", cost_usd=0.001))
-        wf = self.wf_dict({"nodes": [
-            {"id": "n1", "type": "draw", "fields": {"model": "m", "prompt": "p"}}]})
-        with self.assertRaises(RunError) as ctx:
-            wf.run()
-        self.assertAlmostEqual(ctx.exception.result.cost_usd, 0.001)
-        self.assertAlmostEqual(ctx.exception.result.nodes["n1"].cost_usd, 0.001)
-
-    def test_empty_reply_is_no_image_error(self):
-        self.mock.script("POST", "/api/v1/chat/completions",
-                         {"status": 200, "json": {"choices": [{"message": {"content": None}}]}})
-        wf = self.wf_dict({"nodes": [
-            {"id": "n1", "type": "draw", "fields": {"model": "m", "prompt": "p"}}]})
-        with self.assertRaises(RunError) as ctx:
-            wf.run()
-        self.assertIn("no image in response", str(ctx.exception))
-
-    def test_show_thinking_defaults_on_for_draw(self):
-        self.mock.script("POST", "/api/v1/chat/completions",
-                         chat_response("caption", reasoning="sketching...",
-                                       images=[{"url": "data:image/png;base64,X"}]))
-        wf = self.wf_dict({"nodes": [
-            {"id": "n1", "type": "draw", "fields": {"model": "m", "prompt": "p"}}]})
-        text = wf.run().nodes["n1"].out["text"]
-        self.assertTrue(text.startswith("```thinking\nsketching...\n```"))
-
-    def test_show_thinking_false_suppresses_reasoning(self):
-        self.mock.script("POST", "/api/v1/chat/completions",
-                         chat_response("caption", reasoning="sketching...",
-                                       images=[{"url": "data:image/png;base64,X"}]))
-        wf = self.wf_dict({"nodes": [
-            {"id": "n1", "type": "draw",
-             "fields": {"model": "m", "prompt": "p", "showThinking": "false"}}]})
-        self.assertEqual(wf.run().nodes["n1"].out["text"], "caption")
-
-
 class FieldOverrideTest(MockedTest):
     def test_wire_into_textarea_field_overrides_typed_value(self):
         self.mock.script("POST", "/api/v1/chat/completions", chat_response("arr"))
@@ -480,21 +390,6 @@ class NamedNodeRunTest(MockedTest):
         req = self.mock.requests_to("/api/v1/chat/completions")[0]
         self.assertEqual(req.json["messages"][-1], {"role": "user", "content": "hello"})
         self.assertEqual(result["Writer"], "ok")
-
-
-class DrawSelTest(MockedTest):
-    def test_baked_sel_picks_the_primary_image(self):
-        # play.html draw: image = res.images[clamp(parseInt(fields.sel))]
-        self.mock.script("POST", "/api/v1/chat/completions", chat_response(
-            "t", images=[{"image_url": {"url": "https://x/0.png"}},
-                         {"image_url": {"url": "https://x/1.png"}}]))
-        wf = self.wf_dict({"nodes": [
-            {"id": "n1", "type": "draw",
-             "fields": {"model": "m", "prompt": "p", "sel": "1"}}]})
-        result = wf.run()
-        self.assertEqual(result["Draw"].url, "https://x/1.png")
-        self.assertEqual([r.url for r in result.nodes["n1"].out["images"]],
-                         ["https://x/0.png", "https://x/1.png"])
 
 
 if __name__ == "__main__":
