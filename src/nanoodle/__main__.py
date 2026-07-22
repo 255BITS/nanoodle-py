@@ -66,6 +66,20 @@ def _fmt_default(v):
     return v if len(v) <= 48 else v[:45] + "..."
 
 
+_MEDIA_INPUT_KINDS = ("image", "audio", "video")
+
+
+def _fmt_media_default(v, kind):
+    """Summarize a media default instead of echoing base64 (data: URLs run to megabytes)."""
+    s = str(v)
+    if s.lower().startswith("data:"):
+        mime = s[5:].split(";", 1)[0].split(",", 1)[0] or kind
+        size = len(s)
+        human = "%.1f MB" % (size / 1048576.0) if size >= 1048576 else "%d KB" % max(1, size // 1024)
+        return "prefilled inline %s (%s)" % (mime, human)
+    return "prefilled %s" % _fmt_default(s)
+
+
 def cmd_inspect(args):
     wf = Workflow.load(args.graph, api_key=args.api_key or "unused-for-inspect")
     for w in wf.warnings:
@@ -76,7 +90,10 @@ def cmd_inspect(args):
         if s.optional:
             bits.append("optional")
         if s.default:
-            bits.append("default=%r" % _fmt_default(s.default))
+            bits.append(_fmt_media_default(s.default, s.kind) if s.kind in _MEDIA_INPUT_KINDS
+                        else "default=%r" % _fmt_default(s.default))
+        elif s.kind in _MEDIA_INPUT_KINDS and not s.optional:
+            bits.append('required — supply: --input "%s=@file"' % s.key)
         if s.options:
             bits.append("options=%s" % "|".join(s.options))
         print("  ".join(bits))

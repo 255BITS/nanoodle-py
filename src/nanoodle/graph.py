@@ -146,6 +146,32 @@ def display_name(node):
     return node.type or "?"
 
 
+# Media fields hold a data: or http(s) URL (the editor writes data: URLs; hand-authored
+# graphs may inline either). Agents sometimes leave prose placeholders ("[image will be
+# provided at run time]") or bare file paths — those LOOK filled (inspect shows a default,
+# the required-input check passes) but would post garbage to the API. Treat anything that
+# isn't a real media URL as EMPTY at load, and say how to actually supply the media.
+_MEDIA_FIELD_KEYS = ("image", "mask", "audio", "video")
+_MEDIA_URL_RE = re.compile(r"^\s*(data:|https?:)", re.I)
+
+
+def _scrub_media_placeholders(nid, fields, warnings):
+    for key in _MEDIA_FIELD_KEYS:
+        v = fields.get(key)
+        if v is None or v == "" or (isinstance(v, str) and _MEDIA_URL_RE.match(v)):
+            continue
+        if isinstance(v, str):
+            shown = '"%s"' % (v if len(v) <= 60 else v[:57] + "…")
+        else:
+            shown = "a non-string value (%s)" % type(v).__name__
+        fields[key] = ""
+        warnings.append(
+            "node %s: fields.%s held %s — not a data: or http(s) URL, so it was treated as empty. "
+            "Leave media fields \"\" in the graph and supply the %s at run time "
+            "(CLI: --input \"<key>=@file\", library: run({\"<key>\": media_from_file(path)}), "
+            "key from inspect/wf.inputs), or inline a data: URL." % (nid, key, shown, key))
+
+
 def materialize(data, warnings=None):
     """Build a Graph from parsed noodle-graph.json (or a minimal {nodes, links}).
 
@@ -173,6 +199,8 @@ def materialize(data, warnings=None):
         if ntype not in NODE_TYPES:
             warnings.append("unknown node type %r (node %s) — it cannot be executed" % (ntype, nid))
         fields = dict(raw.get("fields") or {})
+        if ntype in NODE_TYPES:
+            _scrub_media_placeholders(nid, fields, warnings)
         nodes[nid] = Node(nid, ntype, fields, raw.get("name"))
 
     links = []
